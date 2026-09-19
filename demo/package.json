@@ -15,6 +15,7 @@
     "pack": "npm run build && npm run build:electron && electron-builder --win --dir",
     "dist": "npm run build && npm run build:electron && electron-builder --win",
     "smoke": "npm run build && npm run build:electron && node scripts/smoke.mjs",
+    "smoke:packaged": "node scripts/smoke.mjs --packaged",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

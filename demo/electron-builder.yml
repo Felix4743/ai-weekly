@@ -20,6 +20,12 @@ files:
 # 没有任何原生模块，跳过 rebuild，打包快很多
 npmRebuild: false
 
+# 直接用 node_modules 里已经装好的那份 Electron（复制过去），不走默认的
+# 「下载 zip → 解压到 win-unpacked.tmp → 改名为 win-unpacked」。
+# 本机上那一步稳定失败：刚解压出来的 electron.exe 还被句柄占着，改名报 EPERM。
+# 换机器后这行也可以留着 —— 少一次 150MB 的解压，本来就更划算。
+electronDist: node_modules/electron/dist
+
 win:
   target:
     - target: nsis
