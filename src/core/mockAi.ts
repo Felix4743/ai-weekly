@@ -64,42 +64,120 @@ function firstSentence(text: string, max = 44): string {
   return cut.length > max ? `${cut.slice(0, max)}…` : cut
 }
 
-/** 从一句话里猜出人名。Demo 用的启发式，接真实模型后由模型直接给出。 */
-export function extractName(text: string): string {
+function splitSentences(text: string): string[] {
+  return text
+    .split(/[。！？；\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/** 出现这些词，才认为一句话里可能在说某个人 */
+const PERSON_CONTEXT = /跟|和|与|找|问|约|是|给|让|见|聊|联系|沟通|反馈|拍板|同意|回复|对接|汇报/
+
+/**
+ * 从一句话里猜人名，猜不出返回 null。
+ * Demo 用的启发式；接真实模型后，人名由模型直接给出。
+ */
+export function personHint(text: string): string | null {
   const at = text.match(/@([\w\u4e00-\u9fa5]{1,12})/)
   if (at) return at[1]
-
-  // 张总 / 李老师 / 王经理 —— 取称谓前一个字作姓
-  const suffix = text.match(/总|老师|经理|总监|主任|老板/)
-  if (suffix && suffix.index !== undefined && suffix.index > 0) {
-    const i = suffix.index
-    return text.slice(i - 1, i) + suffix[0]
-  }
 
   // 跟老王 / 和小李 —— 常见昵称
   const nick = text.match(/(?:跟|和|与|找|问|约|是|给|让|联系)([老小][\u4e00-\u9fa5])/)
   if (nick) return nick[1]
 
-  const plain = text.match(
-    /([\u4e00-\u9fa5]{2,3})(?=(?:那边|那儿|一直|还没|说|让|要|没|不|已经|同意|拍板|给|反馈))/,
-  )
-  if (plain) return plain[1]
+  // 张总 / 李老师 / 王经理 —— 取称谓前一个字作姓
+  if (PERSON_CONTEXT.test(text)) {
+    const suffix = text.match(/老师|经理|总监|主任|老板|总/)
+    if (suffix && suffix.index !== undefined && suffix.index > 0) {
+      const i = suffix.index
+      return text.slice(i - 1, i) + suffix[0]
+    }
+  }
 
-  return firstSentence(text, 6)
+  return null
+}
+
+/** 猜不出人名时，退化为句子开头，保证界面上不留空 */
+export function extractName(text: string): string {
+  return personHint(text) ?? firstSentence(text, 6)
 }
 
 function unique(list: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const item of list) {
-    if (!item || seen.has(item)) continue
-    seen.add(item)
-    out.push(item)
+    const t = item.trim()
+    if (!t || seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+  }
+  return out
+}
+
+function dedupePeople(list: PersonNote[]): PersonNote[] {
+  const seen = new Set<string>()
+  const out: PersonNote[] = []
+  for (const p of list) {
+    const name = p.name.trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    out.push({ name, note: p.note.trim() })
   }
   return out
 }
 
 const PENDING_RE = /没|拖|卡|忘|还没|来不及|延期|一直|等着|干等|悬/
+const WIN_RE = /顺利|搞定|完成|通过|终于|解决|拿下|谈成/
+
+function cloneResult(r: WeeklyResult): WeeklyResult {
+  return {
+    events: [...r.events],
+    people: r.people.map((p) => ({ ...p })),
+    pending: [...r.pending],
+    highlights: [...r.highlights],
+    nextFocus: [...r.nextFocus],
+    nextFollowUps: [...r.nextFollowUps],
+  }
+}
+
+/** 本周热点：从当前清单里挑出最值得记住的几条 */
+function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]>): string[] {
+  const pool = [...result.events, ...result.pending, ...byDim.mood, ...byDim.closing]
+  const highlights: string[] = []
+
+  if (result.events[0]) highlights.push(`${result.events[0]} —— 这是这周精力主要落的地方`)
+  const win = pool.find((t) => WIN_RE.test(t))
+  if (win) highlights.push(`${firstSentence(win, 36)}，值得记一笔`)
+  if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还悬着，下周需要一个交代`)
+  if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
+  if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)
+
+  return unique(highlights).slice(0, 5)
+}
+
+/** 下周计划：基于当前清单给出的建议 */
+function buildNextFocus(result: WeeklyResult): string[] {
+  const blocker = result.pending[0]
+  const focus: string[] = []
+  focus.push(
+    blocker
+      ? `推动「${firstSentence(blocker, 22)}」有一个明确结果`
+      : '把手上最占精力的一件事推进到有结论',
+  )
+  focus.push(
+    result.people[0] ? `主动联系 ${result.people[0].name}，把话说开` : '把欠下的那次联系补上',
+  )
+  focus.push('给自己留一段不被打断的时间，处理一直往后拖的那件事')
+  return unique(focus).slice(0, 3)
+}
+
+function buildFollowUps(result: WeeklyResult): string[] {
+  const names: string[] = []
+  if (result.people[0]) names.push(result.people[0].name)
+  if (result.people[1]) names.push(result.people[1].name)
+  return unique(names).slice(0, 2)
+}
 
 export interface MockAiOptions {
   /** 测试时关闭模拟延迟，避免拖慢用例 */
@@ -149,9 +227,9 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
 
     async summarize(history: ChatMessage[]): Promise<WeeklyResult> {
       await wait(1500)
-      const result = createEmptyResult()
       const byDim = groupAnswers(history)
       const all = [...byDim.event, ...byDim.people, ...byDim.mood, ...byDim.closing]
+      const result = createEmptyResult()
 
       if (all.length === 0) {
         result.events = ['（这次没有聊到具体的事情）']
@@ -172,42 +250,51 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
         people.push({ name: extractName(t), note: firstSentence(t, 40) })
         if (people.length >= 3) break
       }
-      result.people = people.filter((p, i) => people.findIndex((q) => q.name === p.name) === i)
+      result.people = dedupePeople(people)
 
-      // 悬而未决
-      result.pending = unique(all.filter((t) => PENDING_RE.test(t)).map((t) => firstSentence(t, 40))).slice(
-        0,
-        4,
-      )
+      // 悬着
+      result.pending = unique(
+        all.filter((t) => PENDING_RE.test(t)).map((t) => firstSentence(t, 40)),
+      ).slice(0, 4)
 
-      // 本周热点：从真实回答里挑出最值得记住的几条
-      const highlights: string[] = []
-      if (result.events[0]) highlights.push(`${result.events[0]} —— 这是这周精力主要落的地方`)
-      const win = all.find((t) => /顺利|搞定|完成|通过|终于|解决|拿下|谈成/.test(t))
-      if (win) highlights.push(`${firstSentence(win, 36)}，值得记一笔`)
-      if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还悬着，下周需要一个交代`)
-      if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
-      if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)
-      result.highlights = unique(highlights).slice(0, 5)
+      result.highlights = buildHighlights(result, byDim)
+      result.nextFocus = buildNextFocus(result)
+      result.nextFollowUps = buildFollowUps(result)
 
-      // 下周计划
-      const blocker = result.pending[0]
-      const focus: string[] = []
-      focus.push(
-        blocker
-          ? `推动「${firstSentence(blocker, 22)}」有一个明确结果`
-          : '把手上最占精力的一件事推进到有结论',
-      )
-      focus.push(
-        result.people[0] ? `主动联系 ${result.people[0].name}，把话说开` : '把欠下的那次联系补上',
-      )
-      focus.push('给自己留一段不被打断的时间，处理一直往后拖的那件事')
-      result.nextFocus = unique(focus).slice(0, 3)
+      return result
+    },
 
-      const followUps: string[] = []
-      if (result.people[0]) followUps.push(result.people[0].name)
-      if (result.people[1]) followUps.push(result.people[1].name)
-      result.nextFollowUps = unique(followUps).slice(0, 2)
+    async refine(
+      history: ChatMessage[],
+      current: WeeklyResult,
+      note: string,
+    ): Promise<WeeklyResult> {
+      await wait(1300)
+      const byDim = groupAnswers(history)
+      // 以用户改过的版本为起点，尊重手工编辑
+      const result = cloneResult(current)
+
+      for (const part of splitSentences(note)) {
+        const person = personHint(part)
+        if (person) {
+          result.people.push({ name: person, note: firstSentence(part, 40) })
+          continue
+        }
+        if (PENDING_RE.test(part)) {
+          result.pending.push(firstSentence(part, 40))
+          continue
+        }
+        result.events.push(firstSentence(part, 50))
+      }
+
+      result.events = unique(result.events)
+      result.pending = unique(result.pending)
+      result.people = dedupePeople(result.people)
+
+      // 只重新生成「本周热点」和「下周计划」，清单内容保留用户的修改
+      result.highlights = buildHighlights(result, byDim)
+      result.nextFocus = buildNextFocus(result)
+      result.nextFollowUps = buildFollowUps(result)
 
       return result
     },

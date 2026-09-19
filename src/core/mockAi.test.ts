@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMockAi, extractName, groupAnswers, sampleAnswer } from './mockAi'
+import { createMockAi, extractName, groupAnswers, personHint, sampleAnswer } from './mockAi'
 import { createInterview, currentFollowUp, currentQuestion } from './interview'
 import type { ChatMessage, Dimension, InterviewState } from './types'
 
@@ -101,5 +101,64 @@ describe('演示用假 AI', () => {
     expect(sampleAnswer('event', 0).length).toBeGreaterThan(0)
     expect(sampleAnswer('event', 4)).toBe(sampleAnswer('event', 0))
     expect(sampleAnswer('closing', 0).length).toBeGreaterThan(0)
+  })
+
+  it('猜不出人名时返回 null，避免把普通句子当成人', () => {
+    expect(personHint('要把季度数据整理完')).toBeNull()
+    expect(personHint('给自己留出整块时间')).toBeNull()
+    expect(personHint('写个总结')).toBeNull()
+  })
+})
+
+describe('用户补充后由 AI 重新整理', () => {
+  it('尊重用户已经手工做过的修改', async () => {
+    const initial = await ai.summarize(FULL_HISTORY)
+    const edited = {
+      ...initial,
+      events: ['我自己改过的事情', ...initial.events],
+      people: [...initial.people, { name: '手工加的人', note: '我加的' }],
+    }
+
+    const next = await ai.refine(FULL_HISTORY, edited, '下周要跟赵总确认一下预算。')
+
+    expect(next.events).toContain('我自己改过的事情')
+    expect(next.people.map((p) => p.name)).toContain('手工加的人')
+  })
+
+  it('把补充内容识别成人、悬着或事情', async () => {
+    const initial = await ai.summarize(FULL_HISTORY)
+    const next = await ai.refine(
+      FULL_HISTORY,
+      initial,
+      '下周要跟赵总确认预算。体检还一直没预约。把桌面整理一下。',
+    )
+
+    expect(next.people.map((p) => p.name)).toContain('赵总')
+    expect(next.pending.join(' ')).toContain('体检')
+    expect(next.events.join(' ')).toContain('桌面')
+  })
+
+  it('重新整理后仍然给出热点与三条下周建议', async () => {
+    const initial = await ai.summarize(FULL_HISTORY)
+    const next = await ai.refine(FULL_HISTORY, initial, '下周要跟赵总确认预算。')
+
+    expect(next.highlights.length).toBeGreaterThan(0)
+    expect(next.nextFocus).toHaveLength(3)
+    expect(next.nextFollowUps.length).toBeGreaterThan(0)
+  })
+
+  it('补充为空时不会破坏原有结果', async () => {
+    const initial = await ai.summarize(FULL_HISTORY)
+    const next = await ai.refine(FULL_HISTORY, initial, '   ')
+    expect(next.events).toEqual(initial.events)
+    expect(next.people).toEqual(initial.people)
+    expect(next.nextFocus).toEqual(initial.nextFocus)
+  })
+
+  it('重复补充不会产生重复条目', async () => {
+    const initial = await ai.summarize(FULL_HISTORY)
+    const once = await ai.refine(FULL_HISTORY, initial, '下周要跟赵总确认预算。')
+    const twice = await ai.refine(FULL_HISTORY, once, '下周要跟赵总确认预算。')
+    expect(twice.people.filter((p) => p.name === '赵总')).toHaveLength(1)
   })
 })

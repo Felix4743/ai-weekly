@@ -22,6 +22,7 @@ import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
 
 type Page = 'setup' | 'chat' | 'result'
+type Overlay = { title: string; sub: string } | null
 
 function aiMessage(text: string, dimension: Dimension): ChatMessage {
   return { id: nextId('a'), role: 'ai', text, dimension, at: Date.now() }
@@ -37,12 +38,13 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [interview, setInterview] = useState<InterviewState>(() => createInterview())
   const [typing, setTyping] = useState(false)
-  const [summarizing, setSummarizing] = useState(false)
+  const [overlay, setOverlay] = useState<Overlay>(null)
   const [result, setResult] = useState<WeeklyResult | null>(null)
   const [restored, setRestored] = useState(false)
 
   const messagesRef = useRef<ChatMessage[]>([])
   const interviewRef = useRef<InterviewState>(interview)
+  const resultRef = useRef<WeeklyResult | null>(null)
   const busyRef = useRef(false)
 
   const commitMessages = useCallback((list: ChatMessage[]) => {
@@ -55,11 +57,18 @@ export default function App() {
     setInterview(next)
   }, [])
 
+  const commitResult = useCallback((next: WeeklyResult) => {
+    resultRef.current = next
+    setResult(next)
+    saveSession({ messages: messagesRef.current, result: next, savedAt: Date.now() })
+  }, [])
+
   const startInterview = useCallback(async () => {
     if (busyRef.current) return
     busyRef.current = true
     commitMessages([])
     commitInterview(createInterview())
+    resultRef.current = null
     setResult(null)
     setRestored(false)
     setPage('chat')
@@ -81,13 +90,12 @@ export default function App() {
   }, [])
 
   const runSummarize = useCallback(async () => {
-    setSummarizing(true)
+    setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
     const r = await ai.summarize(messagesRef.current)
-    setResult(r)
-    saveSession({ messages: messagesRef.current, result: r, savedAt: Date.now() })
-    setSummarizing(false)
+    setOverlay(null)
+    commitResult(r)
     setPage('result')
-  }, [ai])
+  }, [ai, commitResult])
 
   const handleSend = useCallback(
     async (raw: string) => {
@@ -114,10 +122,7 @@ export default function App() {
       }
 
       const nextText = await ai.nextMessage(advanced, messagesRef.current)
-      commitMessages([
-        ...messagesRef.current,
-        aiMessage(nextText, currentDimension(advanced)),
-      ])
+      commitMessages([...messagesRef.current, aiMessage(nextText, currentDimension(advanced))])
       setTyping(false)
       busyRef.current = false
     },
@@ -133,6 +138,20 @@ export default function App() {
     busyRef.current = false
   }, [commitInterview, runSummarize])
 
+  const handleRefine = useCallback(
+    async (note: string) => {
+      const current = resultRef.current
+      if (!current || busyRef.current) return
+      busyRef.current = true
+      setOverlay({ title: '正在重新整理…', sub: '结合你的补充，重写热点和下周计划' })
+      const next = await ai.refine(messagesRef.current, current, note)
+      setOverlay(null)
+      commitResult(next)
+      busyRef.current = false
+    },
+    [ai, commitResult],
+  )
+
   const handleConfigSubmit = useCallback(
     (next: AppConfig) => {
       setConfig(next)
@@ -145,6 +164,7 @@ export default function App() {
   const handleRestore = useCallback(() => {
     const saved = loadSession()
     if (!saved) return
+    resultRef.current = saved.result
     setResult(saved.result)
     commitMessages(saved.messages)
     setRestored(true)
@@ -185,7 +205,7 @@ export default function App() {
           typing={typing}
           interview={interview}
           progress={progressPercent(interview)}
-          busy={summarizing}
+          busy={overlay !== null}
           sampleText={sampleText}
           onSend={handleSend}
           onFinish={handleFinish}
@@ -197,17 +217,20 @@ export default function App() {
           result={result}
           messages={messages}
           restored={restored}
+          refining={overlay !== null}
+          onResultChange={commitResult}
+          onRefine={handleRefine}
           onRestart={handleRestart}
           onBack={() => setPage('chat')}
         />
       )}
 
-      {summarizing && (
+      {overlay && (
         <div className="overlay">
           <div className="overlay-card">
             <div className="spinner" aria-hidden="true" />
-            <div className="overlay-title">正在整理这一周…</div>
-            <div className="overlay-sub">把你说过的内容归纳成清单，再想想下周</div>
+            <div className="overlay-title">{overlay.title}</div>
+            <div className="overlay-sub">{overlay.sub}</div>
           </div>
         </div>
       )}

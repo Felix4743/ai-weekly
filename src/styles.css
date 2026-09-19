@@ -532,24 +532,15 @@ body {
   border-color: #dceceb;
 }
 
-.grid-3,
-.grid-2 {
+.plan-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   margin-top: 10px;
 }
 
-.grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.grid-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 @media (max-width: 680px) {
-  .grid-3,
-  .grid-2 {
+  .plan-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -562,35 +553,69 @@ body {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.result-list {
+/* ---------- 可编辑列表 ---------- */
+
+.editable {
+  display: flex;
+  flex-direction: column;
+}
+
+.edit-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
 }
 
-.result-list li {
+.edit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 6px 4px 2px;
+  border-radius: 8px;
+}
+
+.edit-row:hover {
+  background: #fbfaf8;
+}
+
+.edit-text {
+  flex: 1;
   position: relative;
-  padding-left: 14px;
+  font: inherit;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0 4px 0 15px;
+  color: var(--ink);
+  cursor: text;
 }
 
-.result-list li::before {
+.edit-text::before {
   content: '';
   position: absolute;
-  left: 2px;
-  top: 10px;
+  left: 4px;
+  top: 9px;
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: var(--ink-3);
 }
 
-.highlight-card .result-list li::before {
+.highlight-card .edit-text::before {
   background: var(--accent);
+}
+
+.edit-text:hover {
+  background: var(--accent-soft);
+}
+
+.edit-text.person b {
+  font-weight: 600;
 }
 
 .person-note {
@@ -598,6 +623,139 @@ body {
   color: var(--ink-2);
   font-size: 13px;
   font-weight: 400;
+}
+
+.row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.edit-row:hover .row-actions,
+.row-actions.always {
+  opacity: 1;
+}
+
+.row-actions button {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px 6px;
+  border-radius: 6px;
+}
+
+.row-actions button:hover {
+  color: var(--ink);
+  background: var(--line-soft);
+}
+
+.edit-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  padding: 5px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.person-form {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.person-form .edit-input:first-of-type {
+  flex: 0 0 110px;
+}
+
+.add-btn {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-3);
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 4px 12px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.edit-hint {
+  margin-left: 6px;
+  color: var(--ink-3);
+}
+
+.badge-ai {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  vertical-align: 1px;
+}
+
+.plan-card {
+  background: linear-gradient(180deg, #f8fbfb 0%, #ffffff 45%);
+  border-color: #dceceb;
+}
+
+.refine-box {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.refine-box textarea {
+  width: 100%;
+  font: inherit;
+  resize: none;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.refine-box textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.refine-box textarea:disabled {
+  background: #f7f5f2;
+}
+
+.refine-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .empty {

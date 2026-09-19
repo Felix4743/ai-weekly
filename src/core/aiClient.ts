@@ -13,4 +13,9 @@ export interface AiClient {
   nextMessage(state: InterviewState, history: ChatMessage[]): Promise<string>
   /** 汇总全部对话，产出结构化结果 */
   summarize(history: ChatMessage[]): Promise<WeeklyResult>
+  /**
+   * 用户看过结果、做了修改并补充说明之后，重新整理一遍。
+   * 约定：清单内容尊重用户的修改，只重新生成「本周热点」与「下周计划」。
+   */
+  refine(history: ChatMessage[], current: WeeklyResult, note: string): Promise<WeeklyResult>
 }

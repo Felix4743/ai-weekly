@@ -1,30 +1,38 @@
 import { useState } from 'react'
 import { resultToMarkdown } from '../core/resultText'
-import type { ChatMessage, WeeklyResult } from '../core/types'
+import type { ListKey } from '../core/resultEdit'
+import type { ChatMessage, PersonNote, WeeklyResult } from '../core/types'
+import { EditableList, EditablePeople } from './EditableList'
 
 interface Props {
   result: WeeklyResult
   messages: ChatMessage[]
   restored: boolean
+  refining: boolean
+  onResultChange: (next: WeeklyResult) => void
+  onRefine: (note: string) => void
   onRestart: () => void
   onBack: () => void
 }
 
-function List({ items, empty = '（这次没有聊到）' }: { items: string[]; empty?: string }) {
-  if (items.length === 0) return <p className="empty">{empty}</p>
-  return (
-    <ul className="result-list">
-      {items.map((item, i) => (
-        <li key={`${i}-${item}`}>{item}</li>
-      ))}
-    </ul>
-  )
-}
-
-export function ResultPage({ result, messages, restored, onRestart, onBack }: Props) {
+export function ResultPage({
+  result,
+  messages,
+  restored,
+  refining,
+  onResultChange,
+  onRefine,
+  onRestart,
+  onBack,
+}: Props) {
   const [copied, setCopied] = useState(false)
   const [showLog, setShowLog] = useState(false)
+  const [note, setNote] = useState('')
+
   const markdown = resultToMarkdown(result)
+
+  const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
+  const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
 
   const copy = async () => {
     try {
@@ -43,13 +51,23 @@ export function ResultPage({ result, messages, restored, onRestart, onBack }: Pr
     window.setTimeout(() => setCopied(false), 1800)
   }
 
+  const submitNote = () => {
+    const text = note.trim()
+    if (!text || refining) return
+    setNote('')
+    onRefine(text)
+  }
+
   return (
     <main className="page result">
       <div className="result-head">
         <div>
           <h1 className="result-title">本周梳理</h1>
           <p className="result-sub">
-            {restored ? '这是上一次保存的结果' : `基于 ${messages.filter((m) => m.role === 'user').length} 次回答整理而成`}
+            {restored
+              ? '这是上一次保存的结果'
+              : `基于 ${messages.filter((m) => m.role === 'user').length} 次回答整理而成`}
+            <span className="edit-hint">· 内容都可以直接改</span>
           </p>
         </div>
         <div className="result-actions">
@@ -63,50 +81,102 @@ export function ResultPage({ result, messages, restored, onRestart, onBack }: Pr
       </div>
 
       <section className="card">
-        <h2 className="card-title">本周清单</h2>
-        <div className="grid-3">
-          <div className="col">
-            <h3 className="col-title">事</h3>
-            <List items={result.events} />
-          </div>
-          <div className="col">
-            <h3 className="col-title">人</h3>
-            {result.people.length === 0 ? (
-              <p className="empty">（这次没有聊到）</p>
-            ) : (
-              <ul className="result-list">
-                {result.people.map((p, i) => (
-                  <li key={`${i}-${p.name}`}>
-                    <b>{p.name}</b>
-                    {p.note && <span className="person-note">{p.note}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="col">
-            <h3 className="col-title">悬着</h3>
-            <List items={result.pending} />
-          </div>
-        </div>
+        <h2 className="card-title">事情</h2>
+        <p className="card-desc">这周都忙了些什么</p>
+        <EditableList
+          items={result.events}
+          onChange={setList('events')}
+          placeholder="这周做了什么…"
+          addLabel="添加一件事"
+          emptyText="（这次没有聊到具体的事）"
+        />
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">人际</h2>
+        <p className="card-desc">这周和谁有关，卡在了哪里</p>
+        <EditablePeople items={result.people} onChange={setPeople} />
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">悬着</h2>
+        <p className="card-desc">还没做完、一直拖着的事</p>
+        <EditableList
+          items={result.pending}
+          onChange={setList('pending')}
+          placeholder="什么还悬着…"
+          addLabel="添加一条"
+          emptyText="（没有悬着的事）"
+        />
       </section>
 
       <section className="card highlight-card">
         <h2 className="card-title">本周热点</h2>
         <p className="card-desc">这一周真正值得记住的几件事</p>
-        <List items={result.highlights} />
+        <EditableList
+          items={result.highlights}
+          onChange={setList('highlights')}
+          placeholder="想记住什么…"
+          addLabel="添加一条"
+          emptyText="（还没有热点）"
+        />
       </section>
 
-      <section className="card">
-        <h2 className="card-title">下周计划</h2>
-        <div className="grid-2">
-          <div className="col">
+      <section className="card plan-card">
+        <h2 className="card-title">
+          下周计划
+          <span className="badge-ai">AI 建议</span>
+        </h2>
+        <p className="card-desc">
+          下面是 AI 根据这周的情况给出的建议，你可以直接改。想到什么它没考虑到的，写在下面，让它重新整理一遍。
+        </p>
+
+        <div className="plan-grid">
+          <div>
             <h3 className="col-title">三件重点</h3>
-            <List items={result.nextFocus} />
+            <EditableList
+              items={result.nextFocus}
+              onChange={setList('nextFocus')}
+              placeholder="下周的重点…"
+              addLabel="添加一条"
+            />
           </div>
-          <div className="col">
+          <div>
             <h3 className="col-title">要跟进的人</h3>
-            <List items={result.nextFollowUps} empty="（这次没有提到具体的人）" />
+            <EditableList
+              items={result.nextFollowUps}
+              onChange={setList('nextFollowUps')}
+              placeholder="要联系谁…"
+              addLabel="添加一个人"
+              emptyText="（这次没有提到具体的人）"
+            />
+          </div>
+        </div>
+
+        <div className="refine-box">
+          <textarea
+            rows={2}
+            value={note}
+            disabled={refining}
+            placeholder="补充一句，比如：下周必须把报价发出去、得找赵总确认预算…"
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault()
+                submitNote()
+              }
+            }}
+          />
+          <div className="refine-actions">
+            <button
+              className="btn primary"
+              type="button"
+              disabled={!note.trim() || refining}
+              onClick={submitNote}
+            >
+              让 AI 重新整理
+            </button>
+            <span className="hint">清单内容不会被改动，只重写热点和下周计划</span>
           </div>
         </div>
       </section>
