@@ -4,6 +4,8 @@ dist-electron/
 release/
 .npm-cache/
 .electron-cache/
+# 打包出来后有人装在仓库里的那一份（几百 MB，不进版本库）
+mvp/
 *.local
 .DS_Store
 *.log
