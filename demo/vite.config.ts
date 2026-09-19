@@ -92,6 +92,10 @@ function llmProxy(): Plugin {
 }
 
 export default defineConfig({
+  // 打包后页面是用 loadFile（file://）加载的，绝对路径 /assets/... 会直接 404，
+  // 症状就是「窗口起来了、页面全白」—— 冒烟测试第一次跑就抓到了这个。
+  // 改成相对路径后，dev server 与 Electron 两种加载方式都成立。
+  base: './',
   plugins: [react(), llmProxy()],
   server: {
     host: '127.0.0.1',

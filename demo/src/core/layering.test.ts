@@ -13,7 +13,11 @@ import { describe, expect, it } from 'vitest'
  */
 
 const CORE_DIR = dirname(fileURLToPath(import.meta.url))
-const TRANSPORT_DIR = join(CORE_DIR, '..', 'transport')
+const SRC_DIR = join(CORE_DIR, '..')
+const TRANSPORT_DIR = join(SRC_DIR, 'transport')
+const SHARED_DIR = join(SRC_DIR, 'shared')
+const HOST_DIR = join(SRC_DIR, 'host')
+const ELECTRON_DIR = join(SRC_DIR, '..', 'electron')
 
 interface Source {
   name: string
@@ -80,5 +84,74 @@ describe('分层约束 · 传输层可替换', () => {
     expect(contract).toBeDefined()
     expect(contract?.text).toContain('export interface ChatTransport')
     expect(contract?.text).toContain('export interface ChatRequest')
+  })
+})
+
+/**
+ * M4 加进来的两个目录，约束和 core/ 一样是「由测试强制」：
+ * - shared/  主进程与渲染进程共用的契约，必须两边都能用，所以不许认任何一边的环境
+ * - host/    主进程侧的逻辑，必须能脱离 Electron 单测，所以不许 import electron
+ * 而外壳本身只许接线：一旦有人在 main.ts 里写起业务，前端那 100% 可复用的说法就没了。
+ */
+describe('分层约束 · shared 只是共用的契约', () => {
+  const SHARED = sourcesIn(SHARED_DIR)
+
+  it('先确认真的读到了文件', () => {
+    const names = SHARED.map((s) => s.name)
+    expect(names).toContain('ipc.ts')
+    expect(names).toContain('bridge.ts')
+    expect(names).toContain('chatStream.ts')
+  })
+
+  it('shared/ 里不出现 React', () => {
+    const bad = SHARED.filter((s) => /from\s+['"]react(-dom)?['"]/.test(s.text))
+    expect(bad.map((s) => s.name)).toEqual([])
+  })
+
+  it('core/ 不反向依赖 shared/ 与 host/ —— 契约不往业务层倒灌', () => {
+    expect(offenders(/from\s+['"][^'"]*\b(shared|host|electron)\//)).toEqual([])
+  })
+})
+
+describe('分层约束 · host 可以脱离 Electron 单测', () => {
+  const HOST = sourcesIn(HOST_DIR)
+
+  it('先确认真的读到了文件', () => {
+    const names = HOST.map((s) => s.name)
+    expect(names).toContain('fileStore.ts')
+    expect(names).toContain('llmForward.ts')
+    expect(names).toContain('llmService.ts')
+  })
+
+  it('host/ 里不出现 electron —— 否则就没法单测了', () => {
+    const bad = HOST.filter((s) => /from\s+['"]electron['"]|require\(['"]electron['"]\)/.test(s.text))
+    expect(bad.map((s) => s.name)).toEqual([])
+  })
+
+  it('host/ 里不出现 React 与界面', () => {
+    const bad = HOST.filter((s) =>
+      /from\s+['"]react(-dom)?['"]|from\s+['"][^'"]*\bui\//.test(s.text),
+    )
+    expect(bad.map((s) => s.name)).toEqual([])
+  })
+})
+
+describe('分层约束 · Electron 外壳只做接线', () => {
+  const SHELL = sourcesIn(ELECTRON_DIR)
+
+  it('先确认真的读到了文件', () => {
+    const names = SHELL.map((s) => s.name)
+    expect(names).toContain('main.ts')
+    expect(names).toContain('preload.ts')
+  })
+
+  it('外壳自己不发网络请求 —— 那是 src/host 的事', () => {
+    const bad = SHELL.filter((s) => /\bfetch\s*\(/.test(s.text))
+    expect(bad.map((s) => s.name)).toEqual([])
+  })
+
+  it('外壳里不写业务逻辑：不 import core/ 的业务模块', () => {
+    const bad = SHELL.filter((s) => /from\s+['"][^'"]*\bcore\//.test(s.text))
+    expect(bad.map((s) => s.name)).toEqual([])
   })
 })
