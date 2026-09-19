@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { SCRIPT, dimensionScript } from '../core/script'
-import { answeredInBlock, isAllComplete, isBlockComplete, questionsInBlock } from '../core/interview'
+import { SCRIPT, dimensionLabel, dimensionScript } from '../core/script'
+import {
+  answeredInBlock,
+  isAllComplete,
+  isBlockComplete,
+  nextIncompleteBlock,
+  questionsInBlock,
+} from '../core/interview'
 import type { ChatMessage, Dimension, InterviewState } from '../core/types'
 
 interface Props {
@@ -36,9 +42,8 @@ export function ChatPage({
   const script = active ? dimensionScript(active) : undefined
   const blockMessages = active ? messages.filter((m) => m.dimension === active) : []
   const activeComplete = active ? isBlockComplete(interview, active) : false
+  const nextDim = nextIncompleteBlock(interview)
   const allDone = isAllComplete(interview)
-  /** 发送按钮右边那几个「聊一聊XX」 */
-  const otherBlocks = SCRIPT.filter((d) => d.key !== active)
 
   useEffect(() => {
     const el = bodyRef.current
@@ -155,30 +160,31 @@ export function ChatPage({
 
         <div className="composer-actions">
           {active && !activeComplete && (
+            <>
+              <button
+                className="btn primary"
+                type="button"
+                disabled={!draft.trim() || busy}
+                onClick={submit}
+              >
+                发送
+              </button>
+              <span className="hint">Enter 发送 · Shift + Enter 换行</span>
+            </>
+          )}
+
+          {activeComplete && nextDim && (
             <button
-              className="btn primary"
+              className="btn subtle"
               type="button"
-              disabled={!draft.trim() || busy}
-              onClick={submit}
+              disabled={busy}
+              onClick={() => onOpenBlock(nextDim)}
             >
-              发送
+              接着聊「{dimensionLabel(nextDim)}」→
             </button>
           )}
 
-          {/* 发送右边：随时跳到别的块去聊 */}
-          <span className="quick-jumps">
-            {otherBlocks.map((d) => (
-              <button
-                key={d.key}
-                className="btn chip"
-                type="button"
-                disabled={busy}
-                onClick={() => onOpenBlock(d.key)}
-              >
-                聊一聊{d.label}
-              </button>
-            ))}
-          </span>
+          {activeComplete && !nextDim && <span className="idle-hint">四块都聊完了</span>}
 
           <button
             className={`btn generate${allDone ? ' primary' : ''}`}
@@ -189,10 +195,6 @@ export function ChatPage({
             生成我的本周梳理
           </button>
         </div>
-
-        {active && !activeComplete && (
-          <div className="composer-note">Enter 发送 · Shift + Enter 换行</div>
-        )}
       </div>
     </main>
   )
