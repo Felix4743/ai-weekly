@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { createMockAi, extractName, groupAnswers, isNonAnswer, personHint, sampleAnswer } from './mockAi'
+import {
+  createMockAi,
+  extractName,
+  groupAnswers,
+  isNonAnswer,
+  personHint,
+  sampleAnswer,
+  shouldFollowUp,
+} from './mockAi'
 import {
   createInterview,
   currentFollowUp,
   currentQuestion,
   finishAll,
+  nextStep,
   openBlock,
 } from './interview'
 import type { BlockProgress, ChatMessage, Dimension, InterviewState } from './types'
@@ -70,11 +79,11 @@ describe('演示用假 AI · 对话', () => {
     expect(text).toContain('生成')
   })
 
-  it('回答太短就追问，回答完整就换下一题', async () => {
+  it('回答太短就追问，回答完整就换下一题', () => {
     const s = createInterview()
-    expect(await ai.wantsFollowUp('改方案', s, 'event')).toBe(true)
+    expect(shouldFollowUp('改方案', s, 'event')).toBe(true)
     expect(
-      await ai.wantsFollowUp(
+      shouldFollowUp(
         '这周主要是在改客户那个方案，来回改了三版，中间还开了很多会，最后终于定下来了。',
         s,
         'event',
@@ -82,15 +91,64 @@ describe('演示用假 AI · 对话', () => {
     ).toBe(false)
   })
 
-  it('「没有」这类回答不追问，空回答也不追问', async () => {
+  it('「没有」这类回答不追问，空回答也不追问', () => {
     const s = createInterview()
-    expect(await ai.wantsFollowUp('没有，这周没顾上这些。', s, 'thing')).toBe(false)
-    expect(await ai.wantsFollowUp('   ', s, 'event')).toBe(false)
+    expect(shouldFollowUp('没有，这周没顾上这些。', s, 'thing')).toBe(false)
+    expect(shouldFollowUp('   ', s, 'event')).toBe(false)
   })
 
-  it('到达追问上限后不再追问', async () => {
+  it('到达追问上限后不再追问', () => {
     const s = withBlocks({ thing: { askIndex: 0, followUpCount: 2, complete: false } })
-    expect(await ai.wantsFollowUp('短', s, 'thing')).toBe(false)
+    expect(shouldFollowUp('短', s, 'thing')).toBe(false)
+  })
+})
+
+describe('演示用假 AI · 一轮回复', () => {
+  const shortAnswer = [msg('ai', '这周主要忙了些什么？', 'event'), msg('user', '改方案', 'event')]
+  const longAnswer = [
+    msg('ai', '这周主要忙了些什么？', 'event'),
+    msg(
+      'user',
+      '这周主要是在改客户那个方案，来回改了三版，中间还开了很多会，最后终于定下来了。',
+      'event',
+    ),
+  ]
+
+  it('reply 一次就同时给出「要不要追问」和下一句话', async () => {
+    const s = openBlock(createInterview(), 'event')
+    const turn = await ai.reply(s, 'event', shortAnswer)
+    expect(turn.wantsFollowUp).toBe(true)
+    expect(turn.message.length).toBeGreaterThan(0)
+  })
+
+  it('不需要追问时，reply 的话术正好是状态机推进后的下一题', async () => {
+    const s = openBlock(createInterview(), 'event')
+    const turn = await ai.reply(s, 'event', longAnswer)
+    expect(turn.wantsFollowUp).toBe(false)
+    expect(turn.message).toBe(currentQuestion(nextStep(s, 'event', false), 'event'))
+  })
+
+  it('reply 会通过 onDelta 把内容吐出去，拼起来等于完整回复', async () => {
+    const s = openBlock(createInterview(), 'event')
+    const pieces: string[] = []
+    const turn = await ai.reply(s, 'event', longAnswer, (d) => pieces.push(d))
+    expect(pieces.length).toBeGreaterThan(0)
+    expect(pieces.join('')).toBe(turn.message)
+  })
+
+  it('非 instant 模式下是分多次吐字，而不是一次性给完', async () => {
+    const slow = createMockAi()
+    const s = openBlock(createInterview(), 'event')
+    const pieces: string[] = []
+    const turn = await slow.reply(s, 'event', longAnswer, (d) => pieces.push(d))
+    expect(pieces.length).toBeGreaterThan(1)
+    expect(pieces.join('')).toBe(turn.message)
+  })
+
+  it('追问次数到顶时，reply 不再追问', async () => {
+    const s = withBlocks({ event: { askIndex: 0, followUpCount: 2, complete: false } })
+    const turn = await ai.reply(s, 'event', shortAnswer)
+    expect(turn.wantsFollowUp).toBe(false)
   })
 })
 

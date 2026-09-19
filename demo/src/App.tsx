@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createMockAi, sampleAnswer } from './core/mockAi'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { describeError } from './core/aiError'
+import { createAiClient } from './core/createAiClient'
 import {
   coveragePercent,
   createInterview,
@@ -7,6 +8,8 @@ import {
   nextStep,
   openBlock,
 } from './core/interview'
+import { sampleAnswer } from './core/mockAi'
+import { stripMarkerForDisplay } from './core/turn'
 import {
   createDefaultConfig,
   nextId,
@@ -17,6 +20,7 @@ import {
   type WeeklyResult,
 } from './core/types'
 import { loadConfig, loadSession, saveConfig, saveSession } from './storage/localStore'
+import { createBrowserTransport } from './transport/browserTransport'
 import { SetupPage } from './ui/SetupPage'
 import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
@@ -28,24 +32,36 @@ function aiMessage(text: string, dimension: Dimension): ChatMessage {
   return { id: nextId('a'), role: 'ai', text, dimension, at: Date.now() }
 }
 
+/** 流式刷新间隔：模型吐字很快，攒一下再刷，避免一秒几十次重渲染 */
+const STREAM_FLUSH_MS = 60
+
 export default function App() {
-  // Demo 阶段固定使用假 AI；M2 只需在这里换成真实实现
-  const aiRef = useRef(createMockAi())
-  const ai = aiRef.current
+  // 传输层只建一次；M4 换成走主进程 IPC 的实现时，只改这一行
+  const transportRef = useRef(createBrowserTransport())
 
   const [page, setPage] = useState<Page>(() => (loadConfig() ? 'chat' : 'setup'))
   const [config, setConfig] = useState<AppConfig>(() => loadConfig() ?? createDefaultConfig())
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [interview, setInterview] = useState<InterviewState>(() => createInterview())
   const [typing, setTyping] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [error, setError] = useState<string | null>(null)
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [result, setResult] = useState<WeeklyResult | null>(null)
   const [restored, setRestored] = useState(false)
+
+  // 填了 Key 就是真模型，没填就用假 AI 走通流程
+  const { client: ai, mode } = useMemo(
+    () => createAiClient(config, transportRef.current),
+    [config],
+  )
 
   const messagesRef = useRef<ChatMessage[]>([])
   const interviewRef = useRef<InterviewState>(interview)
   const resultRef = useRef<WeeklyResult | null>(null)
   const busyRef = useRef(false)
+  const streamRef = useRef('')
+  const flushTimer = useRef<number | null>(null)
 
   const commitMessages = useCallback((list: ChatMessage[]) => {
     messagesRef.current = list
@@ -63,9 +79,33 @@ export default function App() {
     saveSession({ messages: messagesRef.current, result: next, savedAt: Date.now() })
   }, [])
 
+  /* ---------------- 流式累积 ---------------- */
+
+  const resetStream = useCallback(() => {
+    streamRef.current = ''
+    if (flushTimer.current !== null) {
+      window.clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+    setStreamText('')
+  }, [])
+
+  const pushDelta = useCallback((delta: string) => {
+    streamRef.current += delta
+    if (flushTimer.current !== null) return
+    flushTimer.current = window.setTimeout(() => {
+      flushTimer.current = null
+      // 行首的 [追问]/[换题] 标记不给人看；还没收全时先按住，免得闪一下
+      setStreamText(stripMarkerForDisplay(streamRef.current, false))
+    }, STREAM_FLUSH_MS)
+  }, [])
+
+  /* ---------------- 流程 ---------------- */
+
   const startInterview = useCallback(async () => {
     if (busyRef.current) return
     busyRef.current = true
+    resetStream()
     commitMessages([])
     const fresh = openBlock(createInterview(), 'event')
     commitInterview(fresh)
@@ -74,11 +114,18 @@ export default function App() {
     setRestored(false)
     setPage('chat')
     setTyping(true)
-    const text = await ai.nextMessage(fresh, 'event', [])
-    setTyping(false)
-    commitMessages([aiMessage(text, 'event')])
-    busyRef.current = false
-  }, [ai, commitMessages, commitInterview])
+    try {
+      const text = await ai.nextMessage(fresh, 'event', [], pushDelta)
+      commitMessages([aiMessage(text, 'event')])
+      setError(null)
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      resetStream()
+      setTyping(false)
+      busyRef.current = false
+    }
+  }, [ai, commitInterview, commitMessages, pushDelta, resetStream])
 
   // 首次挂载：若已配置过则直接进入对话
   const bootedRef = useRef(false)
@@ -92,10 +139,16 @@ export default function App() {
 
   const runSummarize = useCallback(async () => {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
-    const r = await ai.summarize(messagesRef.current)
-    setOverlay(null)
-    commitResult(r)
-    setPage('result')
+    try {
+      const r = await ai.summarize(messagesRef.current)
+      commitResult(r)
+      setError(null)
+      setPage('result')
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      setOverlay(null)
+    }
   }, [ai, commitResult])
 
   /** 用户自己点开某一块；如果是第一次打开，让 AI 先开口 */
@@ -114,12 +167,20 @@ export default function App() {
 
       busyRef.current = true
       setTyping(true)
-      const text = await ai.nextMessage(opened, dim, messagesRef.current)
-      setTyping(false)
-      commitMessages([...messagesRef.current, aiMessage(text, dim)])
-      busyRef.current = false
+      resetStream()
+      try {
+        const text = await ai.nextMessage(opened, dim, messagesRef.current, pushDelta)
+        commitMessages([...messagesRef.current, aiMessage(text, dim)])
+        setError(null)
+      } catch (err) {
+        setError(describeError(err))
+      } finally {
+        resetStream()
+        setTyping(false)
+        busyRef.current = false
+      }
     },
-    [ai, commitInterview, commitMessages],
+    [ai, commitInterview, commitMessages, pushDelta, resetStream],
   )
 
   const handleSend = useCallback(
@@ -129,22 +190,28 @@ export default function App() {
       if (!dim || !text || busyRef.current) return
       busyRef.current = true
       setTyping(true)
+      resetStream()
 
       commitMessages([
         ...messagesRef.current,
         { id: nextId('u'), role: 'user', text, dimension: dim, at: Date.now() },
       ])
 
-      const wantsFollowUp = await ai.wantsFollowUp(text, interviewRef.current, dim)
-      const advanced = nextStep(interviewRef.current, dim, wantsFollowUp)
-      commitInterview(advanced)
-
-      const nextText = await ai.nextMessage(advanced, dim, messagesRef.current)
-      commitMessages([...messagesRef.current, aiMessage(nextText, dim)])
-      setTyping(false)
-      busyRef.current = false
+      try {
+        // 一次调用同时拿到「要不要追问」和「下一句话」
+        const turn = await ai.reply(interviewRef.current, dim, messagesRef.current, pushDelta)
+        commitInterview(nextStep(interviewRef.current, dim, turn.wantsFollowUp))
+        commitMessages([...messagesRef.current, aiMessage(turn.message, dim)])
+        setError(null)
+      } catch (err) {
+        setError(describeError(err))
+      } finally {
+        resetStream()
+        setTyping(false)
+        busyRef.current = false
+      }
     },
-    [ai, commitInterview, commitMessages],
+    [ai, commitInterview, commitMessages, pushDelta, resetStream],
   )
 
   const handleGenerate = useCallback(async () => {
@@ -162,10 +229,15 @@ export default function App() {
       if (!current || busyRef.current) return
       busyRef.current = true
       setOverlay({ title: '正在重新整理…', sub: '结合你的补充，重写热点和下周计划' })
-      const next = await ai.refine(messagesRef.current, current, note)
-      setOverlay(null)
-      commitResult(next)
-      busyRef.current = false
+      try {
+        commitResult(await ai.refine(messagesRef.current, current, note))
+        setError(null)
+      } catch (err) {
+        setError(describeError(err))
+      } finally {
+        setOverlay(null)
+        busyRef.current = false
+      }
     },
     [ai, commitResult],
   )
@@ -208,7 +280,9 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">AI 周报</span>
-          <span className="tag">演示模式 · 数据模拟</span>
+          <span className={`tag ${mode}`}>
+            {mode === 'live' ? `真实模型 · ${config.model || '未填模型'}` : '演示模式 · 数据模拟'}
+          </span>
         </div>
         <div className="topbar-right">
           {page !== 'setup' && (
@@ -219,6 +293,15 @@ export default function App() {
         </div>
       </header>
 
+      {error && (
+        <div className="error-bar" role="alert">
+          <span className="error-text">{error}</span>
+          <button className="link-btn" type="button" onClick={() => setError(null)}>
+            知道了
+          </button>
+        </div>
+      )}
+
       {page === 'setup' && (
         <SetupPage config={config} onSubmit={handleConfigSubmit} onRestore={handleRestore} />
       )}
@@ -227,6 +310,7 @@ export default function App() {
         <ChatPage
           messages={messages}
           typing={typing}
+          streamText={streamText}
           interview={interview}
           progress={coveragePercent(interview)}
           busy={overlay !== null}

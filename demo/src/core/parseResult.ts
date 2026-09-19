@@ -93,3 +93,15 @@ export function parseResultSafe(raw: string): ParseOutcome {
     return { result: createEmptyResult(), error: (err as Error).message }
   }
 }
+
+/**
+ * 解析失败时的降级结果。
+ * 文档要求「解析层必须带容错与降级，不允许崩溃」，
+ * 所以这里给出一份看得懂、能继续操作的结果，而不是白屏或报错弹窗。
+ */
+export function degradedResult(reason: string): WeeklyResult {
+  const result = createEmptyResult()
+  result.highlights = [`这次没能整理成功：${reason}`, '可以点「重新整理」再试一次']
+  result.nextFocus = ['重新生成一次本周梳理']
+  return result
+}

@@ -83,6 +83,33 @@ body {
   border-radius: 999px;
 }
 
+/* 真模型用主色，一眼能看出这次是不是在花自己的额度 */
+.tag.live {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-color: #cfe6e2;
+}
+
+/* ---------- 错误提示条 ---------- */
+
+.error-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 24px;
+  background: #fdf1f0;
+  border-bottom: 1px solid #f5d9d6;
+  color: #9a3324;
+  font-size: 13.5px;
+}
+
+.error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ---------- 页面骨架 ---------- */
 
 .page {
@@ -202,6 +229,39 @@ body {
 
 .notice strong {
   color: var(--warm);
+}
+
+/* 真模型模式：换成主色，语气也不再是「演示」 */
+.notice.live {
+  background: var(--accent-soft);
+  border-color: #cfe6e2;
+  color: var(--accent-ink);
+}
+
+.notice.live strong {
+  color: var(--accent-ink);
+}
+
+.notice code,
+.field-hint code {
+  font-family: inherit;
+  font-size: 12.5px;
+  background: rgba(31, 29, 26, 0.06);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.field-hint {
+  margin: -4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  line-height: 1.7;
+}
+
+.field-problem {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #9a3324;
 }
 
 .field {
@@ -453,6 +513,30 @@ body {
   gap: 4px;
   align-items: center;
   padding: 14px;
+}
+
+/* 流式吐字中：光标跟着闪，让人知道还没说完 */
+.bubble.streaming::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: caret 1s step-end infinite;
+}
+
+@keyframes caret {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .bubble.typing i {

@@ -12,6 +12,8 @@ import type { ChatMessage, Dimension, InterviewState } from '../core/types'
 interface Props {
   messages: ChatMessage[]
   typing: boolean
+  /** 正在流式吐出的半截回复；还没有内容时是空串 */
+  streamText: string
   interview: InterviewState
   progress: number
   busy: boolean
@@ -25,6 +27,7 @@ interface Props {
 export function ChatPage({
   messages,
   typing,
+  streamText,
   interview,
   progress,
   busy,
@@ -49,7 +52,7 @@ export function ChatPage({
     const el = bodyRef.current
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, typing, active])
+  }, [messages, typing, streamText, active])
 
   useEffect(() => {
     if (active && !activeComplete) taRef.current?.focus()
@@ -121,7 +124,14 @@ export function ChatPage({
             </div>
           ))}
 
-          {typing && (
+          {typing && streamText && (
+            <div className="msg ai">
+              <span className="avatar" aria-hidden="true" />
+              <div className="bubble streaming">{streamText}</div>
+            </div>
+          )}
+
+          {typing && !streamText && (
             <div className="msg ai">
               <span className="avatar" aria-hidden="true" />
               <div className="bubble typing">

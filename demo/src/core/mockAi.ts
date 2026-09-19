@@ -1,9 +1,10 @@
-import type { AiClient } from './aiClient'
+import type { AiClient, DeltaHandler } from './aiClient'
 import {
   blockProgress,
   currentFollowUp,
   currentQuestion,
   nextIncompleteBlock,
+  nextStep,
 } from './interview'
 import { MAX_FOLLOWUPS_PER_QUESTION, dimensionLabel } from './script'
 import {
@@ -225,6 +226,28 @@ export interface MockAiOptions {
 }
 
 /**
+ * 判断要不要追问。
+ * 抽成同步纯函数：既给假 AI 用，也让这块判断逻辑可以脱离客户端的异步包装直接测。
+ * 真实模型下这个决定由模型自己给（见 turn.ts 的行首标记）。
+ */
+export function shouldFollowUp(
+  userText: string,
+  state: InterviewState,
+  dim: Dimension,
+): boolean {
+  const p = blockProgress(state, dim)
+  if (p.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION) return false
+  const t = userText.trim()
+  if (t.length === 0) return false
+  // 「没有」这类回答没什么可追问的，直接换下一题
+  if (isNonAnswer(t)) return false
+  // 答得越短、或明显带着卡顿情绪，越值得再问一句
+  if (t.length < 20) return true
+  if (p.followUpCount < 1 && /卡|拖|没|难|烦|累|等/.test(t)) return true
+  return false
+}
+
+/**
  * 演示用假 AI。
  * 输出基于用户真实回答拼装，因此看起来像「真的读懂了这一周」，
  * 但完全不联网、不需要 API Key。
@@ -232,39 +255,61 @@ export interface MockAiOptions {
 export function createMockAi(options: MockAiOptions = {}): AiClient {
   const wait = (ms: number): Promise<void> => (options.instant ? Promise.resolve() : delay(ms))
 
+  /** 假 AI 也走流式，这样不填 API Key 也能看到逐字出现的界面 */
+  const streamOut = async (text: string, onDelta?: DeltaHandler): Promise<string> => {
+    if (!onDelta || !text) return text
+    const size = options.instant ? text.length : 3
+    for (let i = 0; i < text.length; i += size) {
+      onDelta(text.slice(i, i + size))
+      if (!options.instant) await delay(24)
+    }
+    return text
+  }
+
+  const nextMessage = async (
+    state: InterviewState,
+    dim: Dimension,
+    history: ChatMessage[],
+    onDelta?: DeltaHandler,
+  ): Promise<string> => {
+    await wait(760)
+    const p = blockProgress(state, dim)
+    const blockHistory = history.filter((m) => m.dimension === dim)
+
+    // 这一块已经聊完
+    if (p.complete) {
+      const remaining = nextIncompleteBlock(state)
+      if (!remaining) return streamOut('四块都聊过了。可以生成你的本周梳理了。', onDelta)
+      return streamOut(
+        `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(remaining)}」，还是先挑别的？`,
+        onDelta,
+      )
+    }
+
+    if (p.followUpCount > 0) return streamOut(currentFollowUp(state, dim), onDelta)
+
+    const question = currentQuestion(state, dim)
+    const isBlockFirst = blockHistory.filter((m) => m.role === 'ai').length === 0
+    if (!isBlockFirst) return streamOut(question, onDelta)
+    return streamOut(`${OPENERS[dim]}${question}`, onDelta)
+  }
+
   return {
-    async wantsFollowUp(userText: string, state: InterviewState, dim: Dimension) {
+    nextMessage,
+
+    async reply(
+      state: InterviewState,
+      dim: Dimension,
+      history: ChatMessage[],
+      onDelta?: DeltaHandler,
+    ) {
       await wait(320)
-      const p = blockProgress(state, dim)
-      if (p.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION) return false
-      const t = userText.trim()
-      if (t.length === 0) return false
-      // 「没有」这类回答没什么可追问的，直接换下一题
-      if (isNonAnswer(t)) return false
-      // 答得越短、或明显带着卡顿情绪，越值得再问一句
-      if (t.length < 20) return true
-      if (p.followUpCount < 1 && /卡|拖|没|难|烦|累|等/.test(t)) return true
-      return false
-    },
-
-    async nextMessage(state: InterviewState, dim: Dimension, history: ChatMessage[]) {
-      await wait(760)
-      const p = blockProgress(state, dim)
-      const blockHistory = history.filter((m) => m.dimension === dim)
-
-      // 这一块已经聊完
-      if (p.complete) {
-        const remaining = nextIncompleteBlock(state)
-        if (!remaining) return '四块都聊过了。可以生成你的本周梳理了。'
-        return `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(remaining)}」，还是先挑别的？`
-      }
-
-      if (p.followUpCount > 0) return currentFollowUp(state, dim)
-
-      const question = currentQuestion(state, dim)
-      const isBlockFirst = blockHistory.filter((m) => m.role === 'ai').length === 0
-      if (!isBlockFirst) return question
-      return `${OPENERS[dim]}${question}`
+      const answers = history.filter((m) => m.role === 'user' && m.dimension === dim)
+      const last = answers.length > 0 ? answers[answers.length - 1].text : ''
+      const wantsFollowUp = shouldFollowUp(last, state, dim)
+      const advanced = nextStep(state, dim, wantsFollowUp)
+      const message = await nextMessage(advanced, dim, history, onDelta)
+      return { wantsFollowUp, message }
     },
 
     async summarize(history: ChatMessage[]): Promise<WeeklyResult> {

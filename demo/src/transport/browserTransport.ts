@@ -1,0 +1,144 @@
+import { AiError, describeFailure } from '../core/aiError'
+import type { ChatRequest, ChatTransport } from '../core/chatTransport'
+import { createSseParser, extractMessageText } from '../core/sse'
+
+/**
+ * 浏览器实现：用 fetch 直接打接口，边收边解析 SSE。
+ *
+ * 开发期统一走 dev server 的 /llm-proxy（见 vite.config.ts）由它代为转发，
+ * 浏览器就不会撞上跨域；而且代理的目标地址来自请求头，所以设置页里
+ * 换成任何 OpenAI 兼容接口都能用。
+ *
+ * M4 接 Electron 时，只需要再写一个走主进程 IPC 的实现替换掉它，
+ * core/ 里的业务逻辑一行都不用改。
+ */
+
+export interface BrowserTransportOptions {
+  /** 是否走 dev 代理；默认取 Vite 的 DEV 标记 */
+  dev?: boolean
+  /** 便于测试注入 */
+  fetchImpl?: typeof fetch
+  /** 单次请求的总超时；流式响应只要还在吐字就不会触发 */
+  timeoutMs?: number
+}
+
+/** 拼出真正要请求的地址 */
+export function resolveChatUrl(baseUrl: string, dev: boolean): string {
+  const base = baseUrl.trim().replace(/\/+$/, '')
+  if (dev) return '/llm-proxy/chat/completions'
+  return `${base}/chat/completions`
+}
+
+async function readAll(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      chunks.push(value)
+      total += value.length
+    }
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    out.set(c, at)
+    at += c.length
+  }
+  return out
+}
+
+export function createBrowserTransport(options: BrowserTransportOptions = {}): ChatTransport {
+  const dev = options.dev ?? Boolean(import.meta.env?.DEV)
+  const doFetch = options.fetchImpl ?? fetch
+  const timeoutMs = options.timeoutMs ?? 120_000
+
+  return {
+    async send(req: ChatRequest, onDelta?: (delta: string) => void): Promise<string> {
+      const baseUrl = req.baseUrl.trim().replace(/\/+$/, '')
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      const onOuterAbort = () => controller.abort()
+      req.signal?.addEventListener('abort', onOuterAbort)
+
+      try {
+        let res: Response
+        try {
+          res = await doFetch(resolveChatUrl(baseUrl, dev), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${req.apiKey}`,
+              // dev 代理据此决定转发到哪台机器；正式环境用不上这个头
+              'x-llm-base': baseUrl,
+            },
+            body: JSON.stringify({
+              model: req.model,
+              messages: req.messages,
+              stream: true,
+              ...(req.json ? { response_format: { type: 'json_object' } } : {}),
+            }),
+            signal: controller.signal,
+          })
+        } catch (err) {
+          if ((err as Error)?.name === 'AbortError') {
+            if (req.signal?.aborted) throw new AiError('已取消')
+            throw new AiError(
+              `请求超过 ${Math.round(timeoutMs / 1000)} 秒还没有结果，请再试一次`,
+            )
+          }
+          throw new AiError('连不上接口地址，检查一下网络和「接口地址」填得对不对', String(err))
+        }
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          throw new AiError(describeFailure(res.status, body), body.slice(0, 400))
+        }
+
+        const reader = res.body?.getReader?.()
+        if (!reader) {
+          const full = extractMessageText(await res.text())
+          if (!full) throw new AiError('模型没有返回任何内容，请再试一次')
+          onDelta?.(full)
+          return full
+        }
+
+        const contentType = res.headers?.get?.('content-type') ?? ''
+        const decoder = new TextDecoder()
+
+        // 有些网关即使 stream=true 也会把整段一次性返回
+        if (!contentType.includes('text/event-stream')) {
+          const raw = decoder.decode(await readAll(reader), { stream: false })
+          const full = extractMessageText(raw) ?? raw.trim()
+          if (!full) throw new AiError('模型没有返回任何内容，请再试一次')
+          onDelta?.(full)
+          return full
+        }
+
+        const parser = createSseParser()
+        let out = ''
+        const push = (deltas: string[]): void => {
+          for (const d of deltas) {
+            out += d
+            onDelta?.(d)
+          }
+        }
+
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          // 必须用流式解码：一个汉字可能被切在相邻两个 chunk 里
+          if (value) push(parser.push(decoder.decode(value, { stream: true })))
+        }
+        push(parser.end())
+
+        if (!out) throw new AiError('模型没有返回任何内容，请再试一次')
+        return out
+      } finally {
+        clearTimeout(timer)
+        req.signal?.removeEventListener('abort', onOuterAbort)
+      }
+    },
+  }
+}
