@@ -10,6 +10,7 @@ import {
   isAllComplete,
   isBlockComplete,
   isFollowUpTurn,
+  isFreeChat,
   nextIncompleteBlock,
   nextStep,
   openBlock,
@@ -36,7 +37,12 @@ describe('分块采访状态机', () => {
     const s = createInterview()
     expect(s.active).toBeNull()
     for (const d of SCRIPT) {
-      expect(blockProgress(s, d.key)).toEqual({ askIndex: 0, followUpCount: 0, complete: false })
+      expect(blockProgress(s, d.key)).toEqual({
+        askIndex: 0,
+        followUpCount: 0,
+        complete: false,
+        freeTurns: 0,
+      })
     }
     expect(coveragePercent(s)).toBe(0)
     expect(isAllComplete(s)).toBe(false)
@@ -80,9 +86,31 @@ describe('分块采访状态机', () => {
     expect(blockProgress(s, 'mood').askIndex).toBe(0)
   })
 
-  it('区块聊完后不再推进', () => {
+  it('区块的主问题聊完后，用户还想说就能接着说（自由聊）', () => {
     const { state } = runBlock(openBlock(createInterview(), 'mood'), 'mood', false)
-    expect(nextStep(state, 'mood', true)).toBe(state)
+    expect(isFreeChat(state, 'mood')).toBe(true)
+
+    const before = coveragePercent(state)
+    const next = nextStep(state, 'mood', true)
+
+    // 题目不再推进，覆盖率也不动 —— 该聊的已经聊过了
+    expect(blockProgress(next, 'mood').askIndex).toBe(blockProgress(state, 'mood').askIndex)
+    expect(blockProgress(next, 'mood').complete).toBe(true)
+    expect(coveragePercent(next)).toBe(before)
+
+    // 但这一句被记下来了，没人把他的话筒收走
+    expect(blockProgress(next, 'mood').freeTurns).toBe(1)
+    expect(blockProgress(next, 'mood').freeTurns).toBeGreaterThan(
+      blockProgress(state, 'mood').freeTurns,
+    )
+  })
+
+  it('每个区块的主问题都不少于 4 个，追问上限至少有 3 次', () => {
+    for (const d of SCRIPT) {
+      expect(d.mainQuestions.length).toBeGreaterThanOrEqual(4)
+      expect(d.followUps.length).toBeGreaterThan(0)
+    }
+    expect(MAX_FOLLOWUPS_PER_QUESTION).toBeGreaterThanOrEqual(3)
   })
 
   it('能区分「换题」和「追问」', () => {

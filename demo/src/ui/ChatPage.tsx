@@ -47,6 +47,8 @@ export function ChatPage({
   const activeComplete = active ? isBlockComplete(interview, active) : false
   const nextDim = nextIncompleteBlock(interview)
   const allDone = isAllComplete(interview)
+  /** 发送下面那排「聊一聊XX」：当前这一块不用再跳过去 */
+  const otherBlocks = SCRIPT.filter((d) => d.key !== active)
 
   useEffect(() => {
     const el = bodyRef.current
@@ -55,12 +57,13 @@ export function ChatPage({
   }, [messages, typing, streamText, active])
 
   useEffect(() => {
-    if (active && !activeComplete) taRef.current?.focus()
-  }, [active, activeComplete])
+    if (active) taRef.current?.focus()
+  }, [active])
 
   const submit = () => {
     const text = draft.trim()
-    if (!text || busy || !active || activeComplete) return
+    // 主问题聊完了也照发 —— 那是用户还想说，不该被拦住
+    if (!text || busy || !active) return
     setDraft('')
     onSend(text)
   }
@@ -107,7 +110,7 @@ export function ChatPage({
         <header className="stage-head">
           <span className="stage-title">{script?.label ?? '选一块开始'}</span>
           <span className="stage-hint">{script?.hint ?? ''}</span>
-          {activeComplete && <span className="stage-done">已聊完</span>}
+          {activeComplete && <span className="stage-done">主问题聊完了 · 想继续就说</span>}
         </header>
 
         <div className="stage-body" ref={bodyRef}>
@@ -151,13 +154,18 @@ export function ChatPage({
           </button>
         )}
 
-        {active && !activeComplete && (
+        {/* 主问题聊完了输入框也留着：想接着说是用户的事，不是脚本的事 */}
+        {active && (
           <textarea
             ref={taRef}
             rows={2}
             value={draft}
             disabled={busy}
-            placeholder="想到什么就说什么，不用组织语言…"
+            placeholder={
+              activeComplete
+                ? '还想说什么？接着说我接着问…'
+                : '想到什么就说什么，不用组织语言…'
+            }
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -169,18 +177,15 @@ export function ChatPage({
         )}
 
         <div className="composer-actions">
-          {active && !activeComplete && (
-            <>
-              <button
-                className="btn primary"
-                type="button"
-                disabled={!draft.trim() || busy}
-                onClick={submit}
-              >
-                发送
-              </button>
-              <span className="hint">Enter 发送 · Shift + Enter 换行</span>
-            </>
+          {active && (
+            <button
+              className="btn primary"
+              type="button"
+              disabled={!draft.trim() || busy}
+              onClick={submit}
+            >
+              发送
+            </button>
           )}
 
           {activeComplete && nextDim && (
@@ -205,6 +210,24 @@ export function ChatPage({
             生成我的本周梳理
           </button>
         </div>
+
+        {/* 发送下面：不用回到顶部，随时换一块聊 */}
+        <div className="quick-jumps">
+          <span className="quick-jumps-label">{active ? '换个话题' : '从哪一块开始'}</span>
+          {otherBlocks.map((d) => (
+            <button
+              key={d.key}
+              className="btn chip"
+              type="button"
+              disabled={busy}
+              onClick={() => onOpenBlock(d.key)}
+            >
+              聊一聊{d.label}
+            </button>
+          ))}
+        </div>
+
+        {active && <div className="composer-note">Enter 发送 · Shift + Enter 换行</div>}
       </div>
     </main>
   )

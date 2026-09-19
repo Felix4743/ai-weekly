@@ -302,6 +302,100 @@ body {
   margin-top: 22px;
 }
 
+/* ---------- 专属采访者 ---------- */
+
+.persona {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.persona-title {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.persona-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.persona-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.persona-preset {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fdfcfb;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.persona-preset:hover {
+  border-color: var(--ink-3);
+}
+
+.persona-preset.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.persona-preset-label {
+  font-size: 13.5px;
+}
+
+.persona-preset-blurb {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.persona-prompt {
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.7;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fdfcfb;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.persona-prompt:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.persona-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.persona-note {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+
 /* ---------- 进度 ---------- */
 
 .progress-wrap {
@@ -626,9 +720,37 @@ body {
   color: var(--ink-3);
 }
 
-/* 对话页里提示跟在发送按钮后面，不需要推到右边 */
-.composer .hint {
-  margin-left: 0;
+/* 发送下面那排「聊一聊XX」：换一块聊，不用回到顶部分页 */
+.quick-jumps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-jumps-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.btn.chip {
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.btn.chip:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.composer-note {
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 .btn.generate {

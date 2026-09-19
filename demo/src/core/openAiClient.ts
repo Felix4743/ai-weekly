@@ -3,6 +3,7 @@ import { AiError } from './aiError'
 import type { ChatMessagePayload, ChatTransport } from './chatTransport'
 import { blockProgress, currentQuestion, nextStep } from './interview'
 import { degradedResult, parseResultSafe } from './parseResult'
+import { resolvePersonaPrompt } from './persona'
 import {
   buildClosingPrompt,
   buildOpeningPrompt,
@@ -28,7 +29,13 @@ export interface OpenAiClientOptions {
 
 const EMPTY_BLOCK_TAIL = '这一块先到这儿。'
 
+/** 自由聊时模型什么都没说，也别让界面空着 */
+const EMPTY_FREE_TAIL = '嗯，还有呢？'
+
 export function createOpenAiClient({ transport, config }: OpenAiClientOptions): AiClient {
+  /** 用户自己定的采访者人设；没写过就用默认那套 */
+  const persona = resolvePersonaPrompt(config)
+
   const send = (
     messages: ChatMessagePayload[],
     json: boolean,
@@ -54,8 +61,8 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
     ): Promise<string> {
       const progress = blockProgress(state, dim)
       const messages = progress.complete
-        ? buildClosingPrompt(state, dim)
-        : buildOpeningPrompt(state, dim, history)
+        ? buildClosingPrompt(state, dim, persona)
+        : buildOpeningPrompt(state, dim, history, persona)
 
       if (messages.length === 0) return ''
 
@@ -73,22 +80,28 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       history: ChatMessage[],
       onDelta?: DeltaHandler,
     ): Promise<TurnResult> {
-      const messages = buildTurnPrompt(state, dim, history)
+      const messages = buildTurnPrompt(state, dim, history, persona)
       if (messages.length === 0) return { wantsFollowUp: false, message: '' }
 
       const raw = await send(messages, false, onDelta)
       const parsed = parseTurnReply(raw)
 
+      const progress = blockProgress(state, dim)
+
       // 状态机才是追问次数的最终裁判：模型说要追问、但次数已经到顶时按换题处理，
-      // 否则「下一句话」和「新状态」会对不上。
-      const wantsFollowUp =
-        parsed.wantsFollowUp &&
-        blockProgress(state, dim).followUpCount < MAX_FOLLOWUPS_PER_QUESTION
+      // 否则「下一句话」和「新状态」会对不上。自由聊没有题目可换，不受这个上限约束。
+      const wantsFollowUp = progress.complete
+        ? parsed.wantsFollowUp
+        : parsed.wantsFollowUp && progress.followUpCount < MAX_FOLLOWUPS_PER_QUESTION
 
       let message = parsed.message
       if (!message) {
-        const advanced = nextStep(state, dim, wantsFollowUp)
-        message = currentQuestion(advanced, dim) || EMPTY_BLOCK_TAIL
+        // 自由聊时脚本里已经没有下一条题目可退，只能给一句中性的搭话
+        if (progress.complete) message = EMPTY_FREE_TAIL
+        else {
+          const advanced = nextStep(state, dim, wantsFollowUp)
+          message = currentQuestion(advanced, dim) || EMPTY_BLOCK_TAIL
+        }
       }
 
       return { wantsFollowUp, message }

@@ -1,5 +1,6 @@
 import type { ChatMessagePayload } from './chatTransport'
 import { blockProgress, currentQuestion, nextStep } from './interview'
+import { buildInterviewerSystem } from './persona'
 import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT, dimensionScript } from './script'
 import type { ChatMessage, Dimension, InterviewState, WeeklyResult } from './types'
 
@@ -55,6 +56,7 @@ export function buildOpeningPrompt(
   state: InterviewState,
   dim: Dimension,
   history: ChatMessage[],
+  persona: string,
 ): ChatMessagePayload[] {
   const script = dimensionScript(dim)
   if (!script) return []
@@ -74,17 +76,21 @@ export function buildOpeningPrompt(
       ? '这是整场采访的第一个问题。请先用半句话打个招呼，然后问出第 1 个主问题。'
       : `请直接问出第 1 个主问题。`,
     '',
-    '要求：口语，像熟人聊天；整段不超过 70 字；不要列清单、不要小标题、不要复述区块名称。',
+    '要求：只问第 1 个主问题，不要列清单、不要小标题、不要复述区块名称。',
   ].join('\n')
 
   return [
-    { role: 'system', content: INTERVIEW_SYSTEM_PLAIN },
+    { role: 'system', content: buildInterviewerSystem(persona, { marker: false }) },
     { role: 'user', content: user },
   ]
 }
 
 /** 区块已经聊完时的收尾语 */
-export function buildClosingPrompt(state: InterviewState, dim: Dimension): ChatMessagePayload[] {
+export function buildClosingPrompt(
+  state: InterviewState,
+  dim: Dimension,
+  persona: string,
+): ChatMessagePayload[] {
   const script = dimensionScript(dim)
   if (!script) return []
 
@@ -95,46 +101,63 @@ export function buildClosingPrompt(state: InterviewState, dim: Dimension): ChatM
       : `还有这些块没聊：${remaining.map((d) => d.label).join('、')}。自然地提一下可以接着聊。`
 
   return [
-    { role: 'system', content: INTERVIEW_SYSTEM_PLAIN },
+    { role: 'system', content: buildInterviewerSystem(persona, { marker: false }) },
     {
       role: 'user',
       content: [
         `「${script.label}」这一块的问题已经问完了。`,
         tail,
         '',
-        '要求：一句话，不超过 45 字，不要总结刚才聊过的内容，不要煽情。',
+        '要求：一句话，不超过 45 字，不要总结刚才聊过的内容，不要煽情。' +
+          '注意别把话筒收走 —— 对方想继续说，随时可以接着说。',
       ].join('\n'),
     },
   ]
 }
-
-const INTERVIEW_SYSTEM_PLAIN = `你是一个陪人做每周复盘的朋友。你的任务是**问出内容**，不是总结，不是安慰，不是评价。
-
-硬性要求：
-1. 只输出你要说的那一句话，不要任何前缀、标记、引号或解释。
-2. 一次只问一件事，用口语，像熟人聊天。
-3. 不要复述对方说过的话，不要说「听起来」「我理解」「这很棒」「辛苦了」这类空话。
-4. 不要编造对方没说过的内容，只依据给出的对话记录。`
-
-const INTERVIEW_SYSTEM_TURN = `你是一个陪人做每周复盘的朋友。你的任务是**问出内容**，不是总结，不是安慰，不是评价。
-
-硬性要求：
-1. 第一行必须**只写** [追问] 或 [换题] 这四个字符之一，第二行开始才是你要说的话。
-2. 一次只问一件事，整段话不超过 60 字，用口语，像熟人聊天。
-3. 不要复述对方说过的话，不要说「听起来」「我理解」「这很棒」「辛苦了」这类空话。
-4. 不要编造对方没说过的内容，只依据给出的对话记录。
-5. 不要输出 JSON，不要输出 markdown。`
 
 /** 用户答完一句之后的唯一一次调用：是否追问 + 下一句话 */
 export function buildTurnPrompt(
   state: InterviewState,
   dim: Dimension,
   history: ChatMessage[],
+  persona: string,
 ): ChatMessagePayload[] {
   const script = dimensionScript(dim)
   if (!script) return []
 
   const progress = blockProgress(state, dim)
+  const system = buildInterviewerSystem(persona, { marker: true })
+  const answers = history.filter((m) => m.role === 'user' && m.dimension === dim)
+  const lastAnswer = answers.length > 0 ? answers[answers.length - 1].text.trim() : ''
+
+  /**
+   * 主问题已经问完，用户还在说 —— 自由聊。
+   * 这里没有题目可以「换」，标记只剩两种含义：还想深挖 / 他说完了。
+   */
+  if (progress.complete) {
+    return [
+      { role: 'system', content: system },
+      {
+        role: 'user',
+        content: [
+          `当前区块：${script.label}（这一块的主问题已经问完了，现在是自由聊）`,
+          '',
+          '这一块的对话记录：',
+          formatTranscript(history, dim),
+          '',
+          '刚刚对方的回答：',
+          `「${lastAnswer}」`,
+          '',
+          '请判断该怎么接：',
+          '- 如果他还想往下说：用 [追问]，顺着这句话问一个具体的问题，抓他话里的时间、结果、卡点或感受。',
+          '- 如果他已经明确表示说完了：用 [换题]，给一句自然的收尾，不要总结，不要煽情。',
+          '',
+          '注意：这一块已经没有新的主问题了 —— 不要念题目，不要催他去聊别的块，也不要把他说过的总结一遍。',
+        ].join('\n'),
+      },
+    ]
+  }
+
   const question = currentQuestion(state, dim)
   const atFollowUpCap = progress.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION
 
@@ -143,9 +166,6 @@ export function buildTurnPrompt(
   const advancedProgress = blockProgress(advanced, dim)
   const blockWillFinish = advancedProgress.complete
   const nextQuestion = blockWillFinish ? '' : currentQuestion(advanced, dim)
-
-  const answers = history.filter((m) => m.role === 'user' && m.dimension === dim)
-  const lastAnswer = answers.length > 0 ? answers[answers.length - 1].text.trim() : ''
 
   const remaining = SCRIPT.filter((d) => !blockProgress(state, d.key).complete)
   const otherBlocks = remaining.filter((d) => d.key !== dim)
@@ -183,7 +203,7 @@ export function buildTurnPrompt(
   ].join('\n')
 
   return [
-    { role: 'system', content: INTERVIEW_SYSTEM_TURN },
+    { role: 'system', content: system },
     { role: 'user', content: user },
   ]
 }

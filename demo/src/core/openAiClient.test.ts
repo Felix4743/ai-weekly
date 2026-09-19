@@ -3,12 +3,16 @@ import { AiError } from './aiError'
 import type { ChatRequest, ChatTransport } from './chatTransport'
 import { createInterview, openBlock } from './interview'
 import { createOpenAiClient } from './openAiClient'
+import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT } from './script'
 import { createEmptyResult, type AppConfig, type ChatMessage, type Dimension, type WeeklyResult } from './types'
+
+const PERSONA = '你是一个测试人设：说话像老同事，不爱客套。'
 
 const CONFIG: AppConfig = {
   apiKey: 'sk-test',
   baseUrl: 'https://api.example.com/v1',
   model: 'test-model',
+  persona: { prompt: PERSONA, preset: 'custom' },
 }
 
 /**
@@ -45,7 +49,19 @@ function withFollowUps(count: number) {
   const base = createInterview()
   return {
     active: 'event' as const,
-    blocks: { ...base.blocks, event: { askIndex: 0, followUpCount: count, complete: false } },
+    blocks: {
+      ...base.blocks,
+      event: { askIndex: 0, followUpCount: count, complete: false, freeTurns: 0 },
+    },
+  }
+}
+
+/** 这一块的主问题已经问完，用户还想接着说 */
+function inFreeChat(freeTurns = 1) {
+  const base = createInterview()
+  return {
+    active: 'event' as const,
+    blocks: { ...base.blocks, event: { ...base.blocks.event, complete: true, freeTurns } },
   }
 }
 
@@ -69,7 +85,7 @@ describe('真实模型客户端 · 一轮回复', () => {
   it('状态机才是追问次数的最终裁判：模型想追问但已到上限，按换题处理', async () => {
     const { transport } = scriptedTransport(['[追问]\n再问一句'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(withFollowUps(2), 'event', HISTORY)
+    const turn = await ai.reply(withFollowUps(MAX_FOLLOWUPS_PER_QUESTION), 'event', HISTORY)
     expect(turn.wantsFollowUp).toBe(false)
   })
 
@@ -110,6 +126,54 @@ describe('真实模型客户端 · 一轮回复', () => {
     const pieces: string[] = []
     await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY, (d) => pieces.push(d))
     expect(pieces.join('')).toBe('[换题]好')
+  })
+})
+
+describe('真实模型客户端 · 专属采访者', () => {
+  it('用户写的人设原样进了请求，机器约定跟在后面', async () => {
+    const { transport, seen } = scriptedTransport(['[换题]下一题'])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+
+    const system = seen[0].messages.find((m) => m.role === 'system')?.content ?? ''
+    expect(system).toContain(PERSONA)
+    expect(system).toContain('[追问]')
+    expect(system).toContain('一次只问一件事')
+  })
+
+  it('换一段人设就换一套口气，不用重启应用', async () => {
+    const { transport, seen } = scriptedTransport(['[换题]一', '[换题]二'])
+    const first = createOpenAiClient({
+      transport,
+      config: { ...CONFIG, persona: { prompt: 'A 人设', preset: 'custom' } },
+    })
+    await first.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+
+    const second = createOpenAiClient({
+      transport,
+      config: { ...CONFIG, persona: { prompt: 'B 人设', preset: 'custom' } },
+    })
+    await second.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+
+    expect(JSON.stringify(seen[0].messages)).toContain('A 人设')
+    expect(JSON.stringify(seen[1].messages)).toContain('B 人设')
+  })
+
+  it('主问题聊完之后还能追：自由聊不受追问上限约束', async () => {
+    const { transport } = scriptedTransport(['[追问]\n那这件事后来呢？'])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
+    expect(turn.wantsFollowUp).toBe(true)
+    expect(turn.message).toBe('那这件事后来呢？')
+  })
+
+  it('自由聊时模型不说话，也不会把最后一道旧题再念一遍', async () => {
+    const { transport } = scriptedTransport(['[追问]\n   '])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
+    const lastQuestion = SCRIPT[0].mainQuestions[SCRIPT[0].mainQuestions.length - 1]
+    expect(turn.message).not.toContain(lastQuestion)
+    expect(turn.message.trim().length).toBeGreaterThan(0)
   })
 })
 

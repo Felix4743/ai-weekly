@@ -276,8 +276,10 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     const p = blockProgress(state, dim)
     const blockHistory = history.filter((m) => m.dimension === dim)
 
-    // 这一块已经聊完
+    // 这一块的主问题已经问完
     if (p.complete) {
+      // 自由聊：他还想接着说，就别再催他换块，顺着往下搭一句
+      if (p.freeTurns > 0) return streamOut('嗯，还有呢？想到什么说什么。', onDelta)
       const remaining = nextIncompleteBlock(state)
       if (!remaining) return streamOut('四块都聊过了。可以生成你的本周梳理了。', onDelta)
       return streamOut(

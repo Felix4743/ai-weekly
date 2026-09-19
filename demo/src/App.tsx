@@ -50,6 +50,8 @@ export default function App() {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [result, setResult] = useState<WeeklyResult | null>(null)
   const [restored, setRestored] = useState(false)
+  /** 从哪一页点进设置的：回去时要还给他，改设置不该等于重开 */
+  const [cameFrom, setCameFrom] = useState<Page | null>(null)
 
   // 填了 Key 就是真模型，没填就用假 AI 走通流程
   const { client: ai, mode } = useMemo(
@@ -247,10 +249,26 @@ export default function App() {
     (next: AppConfig) => {
       setConfig(next)
       saveConfig(next)
+      // 中途进来改设置（比如换一套采访口气）：保存完原路返回，对话一行都不动
+      if (cameFrom) {
+        setPage(cameFrom)
+        setCameFrom(null)
+        return
+      }
       void startInterview()
     },
-    [startInterview],
+    [cameFrom, startInterview],
   )
+
+  const openSetup = useCallback(() => {
+    setCameFrom(page)
+    setPage('setup')
+  }, [page])
+
+  const leaveSetup = useCallback(() => {
+    setPage(cameFrom ?? 'chat')
+    setCameFrom(null)
+  }, [cameFrom])
 
   const handleRestore = useCallback(() => {
     const saved = loadSession()
@@ -287,7 +305,7 @@ export default function App() {
         </div>
         <div className="topbar-right">
           {page !== 'setup' && (
-            <button className="link-btn" type="button" onClick={() => setPage('setup')}>
+            <button className="link-btn" type="button" onClick={openSetup}>
               设置
             </button>
           )}
@@ -304,7 +322,13 @@ export default function App() {
       )}
 
       {page === 'setup' && (
-        <SetupPage config={config} onSubmit={handleConfigSubmit} onRestore={handleRestore} />
+        <SetupPage
+          config={config}
+          ongoing={messages.length > 0 || result !== null}
+          onSubmit={handleConfigSubmit}
+          onRestore={handleRestore}
+          onBackToChat={leaveSetup}
+        />
       )}
 
       {page === 'chat' && (

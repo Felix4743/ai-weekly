@@ -6,7 +6,12 @@ import {
 } from './script'
 import type { BlockProgress, BlockProgressMap, Dimension, InterviewState } from './types'
 
-const EMPTY_PROGRESS: BlockProgress = { askIndex: 0, followUpCount: 0, complete: false }
+const EMPTY_PROGRESS: BlockProgress = {
+  askIndex: 0,
+  followUpCount: 0,
+  complete: false,
+  freeTurns: 0,
+}
 
 export function createInterview(): InterviewState {
   const blocks = {} as BlockProgressMap
@@ -63,7 +68,19 @@ export function nextStep(
   if (!script) return s
 
   const p = blockProgress(s, dim)
-  if (p.complete) return s
+
+  /**
+   * 主问题已经问完，用户还在说。
+   *
+   * 这里刻意只加 freeTurns、不动覆盖率，也不把他赶去下一块：
+   * 脚本问完了不等于他想说的说完了。追问上限是防审讯的，不该用来捂嘴。
+   */
+  if (p.complete) {
+    return {
+      ...s,
+      blocks: { ...s.blocks, [dim]: { ...p, freeTurns: p.freeTurns + 1 } },
+    }
+  }
 
   if (aiWantsFollowUp && p.followUpCount < MAX_FOLLOWUPS_PER_QUESTION) {
     return {
@@ -76,15 +93,23 @@ export function nextStep(
   if (nextAsk < script.mainQuestions.length) {
     return {
       ...s,
-      blocks: { ...s.blocks, [dim]: { askIndex: nextAsk, followUpCount: 0, complete: false } },
+      blocks: {
+        ...s.blocks,
+        [dim]: { askIndex: nextAsk, followUpCount: 0, complete: false, freeTurns: p.freeTurns },
+      },
     }
   }
 
-  // 这一块聊完了，但保持它仍然是当前展开的块
+  // 这一块的主问题聊完了，但保持它仍然是当前展开的块
   return {
     ...s,
     blocks: { ...s.blocks, [dim]: { ...p, followUpCount: 0, complete: true } },
   }
+}
+
+/** 这一块的主问题已经问完，现在多说的每一句都算自由聊 */
+export function isFreeChat(s: InterviewState, dim: Dimension): boolean {
+  return blockProgress(s, dim).complete
 }
 
 /** 用户点「生成梳理」时，把所有区块标记为已结束 */

@@ -16,6 +16,7 @@ import {
   nextStep,
   openBlock,
 } from './interview'
+import { MAX_FOLLOWUPS_PER_QUESTION } from './script'
 import type { BlockProgress, ChatMessage, Dimension, InterviewState } from './types'
 
 const ai = createMockAi({ instant: true })
@@ -26,9 +27,14 @@ function msg(role: 'ai' | 'user', text: string, dimension: Dimension): ChatMessa
   return { id: `m${seq}`, role, text, dimension, at: seq }
 }
 
-function withBlocks(patch: Partial<Record<Dimension, BlockProgress>>): InterviewState {
-  const base = createInterview()
-  return { active: null, blocks: { ...base.blocks, ...patch } }
+/** 只覆盖想改的那几项，其余进度沿用初始值 */
+function withBlocks(patch: Partial<Record<Dimension, Partial<BlockProgress>>>): InterviewState {
+  const blocks = { ...createInterview().blocks }
+  for (const [dim, part] of Object.entries(patch)) {
+    const key = dim as Dimension
+    if (part) blocks[key] = { ...blocks[key], ...part }
+  }
+  return { active: null, blocks }
 }
 
 const FULL_HISTORY: ChatMessage[] = [
@@ -98,8 +104,16 @@ describe('演示用假 AI · 对话', () => {
   })
 
   it('到达追问上限后不再追问', () => {
-    const s = withBlocks({ thing: { askIndex: 0, followUpCount: 2, complete: false } })
+    const s = withBlocks({
+      thing: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
+    })
     expect(shouldFollowUp('短', s, 'thing')).toBe(false)
+  })
+
+  it('主问题聊完之后接着说，就不再催他换块了', async () => {
+    const s = withBlocks({ event: { complete: true, freeTurns: 1 } })
+    const text = await ai.nextMessage(s, 'event', FULL_HISTORY)
+    expect(text).toContain('还有呢')
   })
 })
 
@@ -146,7 +160,9 @@ describe('演示用假 AI · 一轮回复', () => {
   })
 
   it('追问次数到顶时，reply 不再追问', async () => {
-    const s = withBlocks({ event: { askIndex: 0, followUpCount: 2, complete: false } })
+    const s = withBlocks({
+      event: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
+    })
     const turn = await ai.reply(s, 'event', shortAnswer)
     expect(turn.wantsFollowUp).toBe(false)
   })

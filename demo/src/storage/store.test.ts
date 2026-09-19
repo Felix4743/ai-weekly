@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { defaultPersonaPrompt, PERSONA_PRESETS } from '../core/persona'
 import { createDefaultConfig, type AppConfig } from '../core/types'
 import type { AiWeeklyBridge } from '../shared/ipc'
 import { selectStore } from './index'
 import { createIpcStore } from './ipcStore'
 import { createLocalStore } from './localStore'
-import { normalizeConfig, normalizeSession, type SavedSession } from './shape'
+import { normalizeConfig, normalizePersona, normalizeSession, type SavedSession } from './shape'
 
 /**
  * 存储这一层要回答两个问题：
@@ -16,6 +17,7 @@ const GOOD_CONFIG: AppConfig = {
   apiKey: 'sk-1',
   baseUrl: 'https://api.deepseek.com/v1',
   model: 'deepseek-chat',
+  persona: { prompt: '', preset: 'warm' },
 }
 
 const GOOD_SESSION: SavedSession = {
@@ -38,7 +40,36 @@ describe('存储 · 形状归一化', () => {
       apiKey: 'sk-2',
       baseUrl: createDefaultConfig().baseUrl,
       model: createDefaultConfig().model,
+      persona: createDefaultConfig().persona,
     })
+  })
+
+  it('旧版本的配置（还没有专属采访者这一项）照样能读', () => {
+    const legacy = normalizeConfig({ apiKey: 'sk-3', baseUrl: 'https://x/v1', model: 'm' })
+    expect(legacy?.persona).toEqual({ prompt: '', preset: 'warm' })
+    expect(legacy?.apiKey).toBe('sk-3')
+  })
+
+  it('人设写坏了就当他没写过，不往外抛', () => {
+    expect(normalizePersona(null)).toEqual({ prompt: '', preset: 'warm' })
+    expect(normalizePersona('一段字符串')).toEqual({ prompt: '', preset: 'warm' })
+    expect(normalizePersona({ prompt: 42 })).toEqual({ prompt: '', preset: 'warm' })
+  })
+
+  it('人设的预设一律从原文推导，不采信存下来的那个值', () => {
+    // 存的 preset 说自己是温和朋友，但原文是用户自己写的 —— 不能将错就错
+    expect(normalizePersona({ prompt: '像老同事，讲话短。', preset: 'warm' })).toEqual({
+      prompt: '像老同事，讲话短。',
+      preset: 'custom',
+    })
+    // 原文正好等于某套预设时，认得出来
+    const coach = PERSONA_PRESETS.find((p) => p.id === 'coach')
+    expect(normalizePersona({ prompt: coach?.prompt, preset: 'warm' }).preset).toBe('coach')
+  })
+
+  it('默认人设与默认配置保持一致', () => {
+    expect(createDefaultConfig().persona.prompt).toBe('')
+    expect(defaultPersonaPrompt().length).toBeGreaterThan(10)
   })
 
   it('整块不是对象时当没配过', () => {
