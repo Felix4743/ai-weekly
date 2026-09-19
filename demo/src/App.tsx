@@ -19,8 +19,8 @@ import {
   type InterviewState,
   type WeeklyResult,
 } from './core/types'
-import { loadConfig, loadSession, saveConfig, saveSession } from './storage/localStore'
-import { createBrowserTransport } from './transport/browserTransport'
+import { loadConfig, loadSession, saveConfig, saveSession } from './storage'
+import { createTransport } from './transport'
 import { SetupPage } from './ui/SetupPage'
 import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
@@ -36,8 +36,9 @@ function aiMessage(text: string, dimension: Dimension): ChatMessage {
 const STREAM_FLUSH_MS = 60
 
 export default function App() {
-  // 传输层只建一次；M4 换成走主进程 IPC 的实现时，只改这一行
-  const transportRef = useRef(createBrowserTransport())
+  // 传输层只建一次；装在 Electron 里自动走主进程 IPC，在浏览器里走 fetch。
+  // 「换外壳」这件事到此为止 —— 下面全是业务代码，不认壳。
+  const transportRef = useRef(createTransport())
 
   const [page, setPage] = useState<Page>(() => (loadConfig() ? 'chat' : 'setup'))
   const [config, setConfig] = useState<AppConfig>(() => loadConfig() ?? createDefaultConfig())

@@ -1,13 +1,16 @@
-import { createDefaultConfig, type AppConfig, type ChatMessage, type WeeklyResult } from '../core/types'
+import type { AppConfig } from '../core/types'
+import { normalizeConfig, normalizeSession, type AppStore, type SavedSession } from './shape'
+
+/**
+ * 浏览器里的存储：localStorage。
+ * 读取一律经过 shape.ts 的归一化，坏了当没有，不往外抛 —— 存储出问题
+ * 不该让整个应用打不开。
+ */
+
+export type { SavedSession } from './shape'
 
 const CONFIG_KEY = 'ai-weekly:config'
 const SESSION_KEY = 'ai-weekly:last-session'
-
-export interface SavedSession {
-  messages: ChatMessage[]
-  result: WeeklyResult
-  savedAt: number
-}
 
 function storage(): Storage | null {
   try {
@@ -18,60 +21,42 @@ function storage(): Storage | null {
   }
 }
 
-export function loadConfig(): AppConfig | null {
+function read(key: string): unknown {
   const s = storage()
   if (!s) return null
   try {
-    const raw = s.getItem(CONFIG_KEY)
+    const raw = s.getItem(key)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<AppConfig>
-    const base = createDefaultConfig()
-    return {
-      apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : base.apiKey,
-      baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : base.baseUrl,
-      model: typeof parsed.model === 'string' ? parsed.model : base.model,
-    }
+    return JSON.parse(raw) as unknown
   } catch {
     return null
   }
 }
 
-export function saveConfig(config: AppConfig): void {
+function write(key: string, value: unknown): void {
   const s = storage()
   if (!s) return
   try {
-    s.setItem(CONFIG_KEY, JSON.stringify(config))
+    s.setItem(key, JSON.stringify(value))
   } catch {
     /* 存储不可用时静默降级，不影响本次使用 */
   }
 }
 
+export function loadConfig(): AppConfig | null {
+  return normalizeConfig(read(CONFIG_KEY))
+}
+
+export function saveConfig(config: AppConfig): void {
+  write(CONFIG_KEY, config)
+}
+
 export function loadSession(): SavedSession | null {
-  const s = storage()
-  if (!s) return null
-  try {
-    const raw = s.getItem(SESSION_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<SavedSession>
-    if (!Array.isArray(parsed.messages) || !parsed.result) return null
-    return {
-      messages: parsed.messages,
-      result: parsed.result,
-      savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
-    }
-  } catch {
-    return null
-  }
+  return normalizeSession(read(SESSION_KEY))
 }
 
 export function saveSession(session: SavedSession): void {
-  const s = storage()
-  if (!s) return
-  try {
-    s.setItem(SESSION_KEY, JSON.stringify(session))
-  } catch {
-    /* 同上 */
-  }
+  write(SESSION_KEY, session)
 }
 
 export function clearSession(): void {
@@ -82,4 +67,8 @@ export function clearSession(): void {
   } catch {
     /* 同上 */
   }
+}
+
+export function createLocalStore(): AppStore {
+  return { loadConfig, saveConfig, loadSession, saveSession, clearSession }
 }
