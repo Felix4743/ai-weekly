@@ -1,84 +1,136 @@
-import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT, TOTAL_MAIN_QUESTIONS } from './script'
-import type { Dimension, InterviewState } from './types'
+import {
+  MAX_FOLLOWUPS_PER_QUESTION,
+  SCRIPT,
+  TOTAL_MAIN_QUESTIONS,
+  dimensionScript,
+} from './script'
+import type { BlockProgress, BlockProgressMap, Dimension, InterviewState } from './types'
+
+const EMPTY_PROGRESS: BlockProgress = { askIndex: 0, followUpCount: 0, complete: false }
 
 export function createInterview(): InterviewState {
-  return { dimensionIndex: 0, askIndex: 0, followUpCount: 0, done: false }
+  const blocks = {} as BlockProgressMap
+  for (const d of SCRIPT) {
+    blocks[d.key] = { ...EMPTY_PROGRESS }
+  }
+  return { active: null, blocks }
 }
 
-export function currentDimension(s: InterviewState): Dimension {
-  const d = SCRIPT[Math.min(s.dimensionIndex, SCRIPT.length - 1)]
-  return d.key
+export function blockProgress(s: InterviewState, dim: Dimension): BlockProgress {
+  return s.blocks[dim] ?? EMPTY_PROGRESS
 }
 
-/** 当前主问题原文 */
-export function currentQuestion(s: InterviewState): string {
-  const d = SCRIPT[s.dimensionIndex]
-  if (!d) return ''
-  return d.mainQuestions[Math.min(s.askIndex, d.mainQuestions.length - 1)] ?? ''
+/* ---------------- 展开 / 收起 ---------------- */
+
+export function openBlock(s: InterviewState, dim: Dimension): InterviewState {
+  if (s.active === dim) return s
+  return { ...s, active: dim }
 }
 
-/** 当前应使用的追问话术 */
-export function currentFollowUp(s: InterviewState): string {
-  const d = SCRIPT[s.dimensionIndex]
-  if (!d) return ''
-  return d.followUps[s.followUpCount % d.followUps.length] ?? ''
+export function closeBlock(s: InterviewState): InterviewState {
+  if (s.active === null) return s
+  return { ...s, active: null }
 }
+
+/* ---------------- 当前该问什么 ---------------- */
+
+export function currentQuestion(s: InterviewState, dim: Dimension): string {
+  const script = dimensionScript(dim)
+  if (!script) return ''
+  const p = blockProgress(s, dim)
+  return script.mainQuestions[Math.min(p.askIndex, script.mainQuestions.length - 1)] ?? ''
+}
+
+export function currentFollowUp(s: InterviewState, dim: Dimension): string {
+  const script = dimensionScript(dim)
+  if (!script) return ''
+  const p = blockProgress(s, dim)
+  return script.followUps[p.followUpCount % script.followUps.length] ?? ''
+}
+
+/** 当前这一问是不是追问（用于让 AI 区分「换题」和「深挖」） */
+export function isFollowUpTurn(s: InterviewState, dim: Dimension): boolean {
+  return blockProgress(s, dim).followUpCount > 0
+}
+
+/* ---------------- 推进 ---------------- */
 
 /**
- * 核心状态机：是否追问由 AI 提议，但覆盖范围由状态机硬性约束。
- * 这是本产品最重要的设计——AI 负责问得自然，状态机负责不漏块。
+ * 在某个区块内推进一步。
+ * 是否追问由 AI 提议，但次数上限与区块推进由状态机硬性约束。
  */
-export function nextStep(s: InterviewState, aiWantsFollowUp: boolean): InterviewState {
-  if (s.done) return s
+export function nextStep(
+  s: InterviewState,
+  dim: Dimension,
+  aiWantsFollowUp: boolean,
+): InterviewState {
+  const script = dimensionScript(dim)
+  if (!script) return s
 
-  const dim = SCRIPT[s.dimensionIndex]
-  if (!dim) return { ...s, done: true }
+  const p = blockProgress(s, dim)
+  if (p.complete) return s
 
-  if (aiWantsFollowUp && s.followUpCount < MAX_FOLLOWUPS_PER_QUESTION) {
-    return { ...s, followUpCount: s.followUpCount + 1 }
+  if (aiWantsFollowUp && p.followUpCount < MAX_FOLLOWUPS_PER_QUESTION) {
+    return {
+      ...s,
+      blocks: { ...s.blocks, [dim]: { ...p, followUpCount: p.followUpCount + 1 } },
+    }
   }
 
-  const nextAsk = s.askIndex + 1
-  if (nextAsk < dim.mainQuestions.length) {
-    return { ...s, askIndex: nextAsk, followUpCount: 0 }
+  const nextAsk = p.askIndex + 1
+  if (nextAsk < script.mainQuestions.length) {
+    return {
+      ...s,
+      blocks: { ...s.blocks, [dim]: { askIndex: nextAsk, followUpCount: 0, complete: false } },
+    }
   }
 
-  const nextDim = s.dimensionIndex + 1
-  if (nextDim < SCRIPT.length) {
-    return { ...s, dimensionIndex: nextDim, askIndex: 0, followUpCount: 0 }
+  // 这一块聊完了，收起区块让用户自己挑下一块
+  return {
+    ...s,
+    active: null,
+    blocks: { ...s.blocks, [dim]: { ...p, followUpCount: 0, complete: true } },
   }
-
-  return { ...s, done: true }
 }
 
-/** 用户点「聊够了」时强制收尾 */
-export function forceFinish(s: InterviewState): InterviewState {
-  return { ...s, done: true }
+/** 用户点「生成梳理」时，把所有区块标记为已结束 */
+export function finishAll(s: InterviewState): InterviewState {
+  const blocks = {} as BlockProgressMap
+  for (const d of SCRIPT) blocks[d.key] = { ...blockProgress(s, d.key), complete: true }
+  return { active: null, blocks }
 }
 
-/** 已经问过的主问题数 */
-export function askedMainQuestions(s: InterviewState): number {
-  let n = 0
-  for (let i = 0; i < s.dimensionIndex && i < SCRIPT.length; i++) {
-    n += SCRIPT[i].mainQuestions.length
-  }
-  const cur = SCRIPT[s.dimensionIndex]
-  if (cur) n += Math.min(s.askIndex, cur.mainQuestions.length)
-  return n
+/* ---------------- 进度与统计 ---------------- */
+
+export function isBlockComplete(s: InterviewState, dim: Dimension): boolean {
+  return blockProgress(s, dim).complete
 }
 
-export function progressPercent(s: InterviewState): number {
-  if (s.done) return 100
-  const pct = (askedMainQuestions(s) / TOTAL_MAIN_QUESTIONS) * 100
-  return Math.max(0, Math.min(99, Math.round(pct)))
+export function isAllComplete(s: InterviewState): boolean {
+  return SCRIPT.every((d) => blockProgress(s, d.key).complete)
 }
 
-/** 是否刚刚进入一个新区块（用于在对话里插入分隔标签） */
-export function startsNewBlock(s: InterviewState): boolean {
-  return s.askIndex === 0 && s.followUpCount === 0 && s.dimensionIndex > 0
+/** 该区块已经回答过几个主问题 */
+export function answeredInBlock(s: InterviewState, dim: Dimension): number {
+  const script = dimensionScript(dim)
+  if (!script) return 0
+  const p = blockProgress(s, dim)
+  if (p.complete) return script.mainQuestions.length
+  return Math.min(p.askIndex, script.mainQuestions.length)
 }
 
-/** 当前区块的提问是否已全部覆盖（AI 应主动询问是否可以出结果） */
-export function isCoverageComplete(s: InterviewState): boolean {
-  return s.done || (s.dimensionIndex === SCRIPT.length - 1 && s.askIndex >= SCRIPT[SCRIPT.length - 1].mainQuestions.length - 1)
+/** 该区块一共有几个主问题 */
+export function questionsInBlock(dim: Dimension): number {
+  return dimensionScript(dim)?.mainQuestions.length ?? 0
+}
+
+export function coveragePercent(s: InterviewState): number {
+  const done = SCRIPT.reduce((n, d) => n + answeredInBlock(s, d.key), 0)
+  const pct = (done / TOTAL_MAIN_QUESTIONS) * 100
+  return Math.max(0, Math.min(100, Math.round(pct)))
+}
+
+/** 下一个还没聊完的区块，用于给出「接着聊」的建议 */
+export function nextIncompleteBlock(s: InterviewState): Dimension | null {
+  return SCRIPT.find((d) => !blockProgress(s, d.key).complete)?.key ?? null
 }

@@ -4,6 +4,7 @@ import { parseResult, parseResultSafe } from './parseResult'
 const GOOD = {
   events: ['改了三版方案，还没定'],
   people: [{ name: '老王', note: '一直没拍板' }],
+  things: ['想换键盘，没定下来'],
   pending: ['报销拖了两周没交'],
   highlights: ['方案难产是这周主线'],
   nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
@@ -32,6 +33,7 @@ describe('模型结果解析', () => {
     const r = parseResult('{"events":["只有这一项"]}')
     expect(r.events).toEqual(['只有这一项'])
     expect(r.people).toEqual([])
+    expect(r.things).toEqual([])
     expect(r.pending).toEqual([])
     expect(r.highlights).toEqual([])
     expect(r.nextFocus).toEqual([])
@@ -52,8 +54,11 @@ describe('模型结果解析', () => {
   })
 
   it('兼容中文键名', () => {
-    const r = parseResult('{"事情":["改方案"],"本周热点":["方案难产"],"下周重点":["定稿"]}')
+    const r = parseResult(
+      '{"事情":["改方案"],"物品":["换键盘"],"本周热点":["方案难产"],"下周重点":["定稿"]}',
+    )
     expect(r.events).toEqual(['改方案'])
+    expect(r.things).toEqual(['换键盘'])
     expect(r.highlights).toEqual(['方案难产'])
     expect(r.nextFocus).toEqual(['定稿'])
   })

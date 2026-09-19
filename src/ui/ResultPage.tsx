@@ -99,6 +99,18 @@ export function ResultPage({
       </section>
 
       <section className="card">
+        <h2 className="card-title">物品</h2>
+        <p className="card-desc">想买的、要处理的、一直堆着的</p>
+        <EditableList
+          items={result.things}
+          onChange={setList('things')}
+          placeholder="想买什么、要处理什么…"
+          addLabel="添加一样东西"
+          emptyText="（这次没有聊到东西）"
+        />
+      </section>
+
+      <section className="card">
         <h2 className="card-title">悬着</h2>
         <p className="card-desc">还没做完、一直拖着的事</p>
         <EditableList

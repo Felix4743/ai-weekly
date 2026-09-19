@@ -1,6 +1,11 @@
 import type { AiClient } from './aiClient'
-import { currentDimension, currentFollowUp, currentQuestion, startsNewBlock } from './interview'
-import { MAX_FOLLOWUPS_PER_QUESTION } from './script'
+import {
+  blockProgress,
+  currentFollowUp,
+  currentQuestion,
+  nextIncompleteBlock,
+} from './interview'
+import { MAX_FOLLOWUPS_PER_QUESTION, dimensionLabel } from './script'
 import {
   createEmptyResult,
   type ChatMessage,
@@ -12,12 +17,12 @@ import {
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-/** 进入新区块时的过渡语，让对话有节奏感 */
-const LEADS: Record<Dimension, string> = {
-  event: '那我们接着往下。',
-  people: '事情先放一放，再聊聊人。',
-  mood: '换个角度 —— ',
-  closing: '最后 —— ',
+/** 每个区块第一次被打开时的开场语 */
+const OPENERS: Record<Dimension, string> = {
+  event: '周末好。我们花五分钟，把这一周过一遍就好。\n\n先从最实在的开始 —— ',
+  people: '好，说说人。',
+  thing: '再说说东西 —— ',
+  mood: '换个角度。',
 }
 
 /** 演示用：一键填入的示例回答，让 Demo 可以快速走完 */
@@ -34,11 +39,16 @@ const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
     '老王那边一直没拍板，事情就卡在他那儿了。',
     '好久没联系老同学了，总觉得该问候一下。',
   ],
+  thing: [
+    '想换个键盘，现在这个用着不顺手，挑了半个月也没定下来。',
+    '旧手机一直扔在抽屉里，想处理掉但一直没腾出手。',
+    '桌面堆了一堆文件，看一次烦一次，就是不动手。',
+    '暂时没有，这周没顾上这些。',
+  ],
   mood: [
     '挺累的，主要就是方案反复改这件事拖着，心里一直不踏实。',
     '还行，就是有点被会议切得太碎，很难进入状态。',
   ],
-  closing: ['暂时没有了，差不多就这些。', '想到一个：想抽空把桌面和电脑文件清理一下。'],
 }
 
 export function sampleAnswer(dim: Dimension, index: number): string {
@@ -49,13 +59,19 @@ export function sampleAnswer(dim: Dimension, index: number): string {
 
 /** 把用户回答按区块归类，供结果生成使用 */
 export function groupAnswers(history: ChatMessage[]): Record<Dimension, string[]> {
-  const out: Record<Dimension, string[]> = { event: [], people: [], mood: [], closing: [] }
+  const out: Record<Dimension, string[]> = { event: [], people: [], thing: [], mood: [] }
   for (const m of history) {
     if (m.role !== 'user') continue
     const t = m.text.trim()
     if (t) out[m.dimension].push(t)
   }
   return out
+}
+
+/** 「没有」「暂时没有」这类回答不是内容，不能当成一条记录 */
+const NON_ANSWER_RE = /^(没有|没|无|暂无|暂时没|暂时没有|没什么|没啥|否|还好|都还好|没呢|没有呢|想不起来)/
+export function isNonAnswer(text: string): boolean {
+  return NON_ANSWER_RE.test(text.trim())
 }
 
 function firstSentence(text: string, max = 44): string {
@@ -127,13 +143,23 @@ function dedupePeople(list: PersonNote[]): PersonNote[] {
   return out
 }
 
+/** 把一串回答整理成结果里的一条条记录 */
+function toItems(answers: string[], max: number, length = 46): string[] {
+  return unique(
+    answers.filter((t) => !isNonAnswer(t)).map((t) => firstSentence(t, length)),
+  ).slice(0, max)
+}
+
 const PENDING_RE = /没|拖|卡|忘|还没|来不及|延期|一直|等着|干等|悬/
 const WIN_RE = /顺利|搞定|完成|通过|终于|解决|拿下|谈成/
+/** 补充内容里出现这些词，认为是在说「东西」 */
+const THING_RE = /买|换|修|扔|处理掉|清理|桌面|下单|到货|退货|物件|东西/
 
 function cloneResult(r: WeeklyResult): WeeklyResult {
   return {
     events: [...r.events],
     people: r.people.map((p) => ({ ...p })),
+    things: [...r.things],
     pending: [...r.pending],
     highlights: [...r.highlights],
     nextFocus: [...r.nextFocus],
@@ -143,7 +169,7 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
 
 /** 本周热点：从当前清单里挑出最值得记住的几条 */
 function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]>): string[] {
-  const pool = [...result.events, ...result.pending, ...byDim.mood, ...byDim.closing]
+  const pool = [...result.events, ...result.pending, ...byDim.mood]
   const highlights: string[] = []
 
   if (result.events[0]) highlights.push(`${result.events[0]} —— 这是这周精力主要落的地方`)
@@ -151,6 +177,7 @@ function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]
   if (win) highlights.push(`${firstSentence(win, 36)}，值得记一笔`)
   if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还悬着，下周需要一个交代`)
   if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
+  if (result.things[0]) highlights.push(`${result.things[0]} —— 一直想弄，还没动手`)
   if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)
 
   return unique(highlights).slice(0, 5)
@@ -168,7 +195,11 @@ function buildNextFocus(result: WeeklyResult): string[] {
   focus.push(
     result.people[0] ? `主动联系 ${result.people[0].name}，把话说开` : '把欠下的那次联系补上',
   )
-  focus.push('给自己留一段不被打断的时间，处理一直往后拖的那件事')
+  focus.push(
+    result.things[0]
+      ? `把「${firstSentence(result.things[0], 18)}」了结掉`
+      : '给自己留一段不被打断的时间，处理一直往后拖的那件事',
+  )
   return unique(focus).slice(0, 3)
 }
 
@@ -177,6 +208,19 @@ function buildFollowUps(result: WeeklyResult): string[] {
   if (result.people[0]) names.push(result.people[0].name)
   if (result.people[1]) names.push(result.people[1].name)
   return unique(names).slice(0, 2)
+}
+
+/** 从按区块分好的回答里，把人抽出来 */
+function buildPeople(answers: string[], max = 3): PersonNote[] {
+  const people: PersonNote[] = []
+  for (const t of answers) {
+    if (isNonAnswer(t)) continue
+    const hinted = personHint(t)
+    if (!hinted) continue
+    people.push({ name: hinted, note: firstSentence(t, 40) })
+    if (people.length >= max) break
+  }
+  return dedupePeople(people)
 }
 
 export interface MockAiOptions {
@@ -193,69 +237,61 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
   const wait = (ms: number): Promise<void> => (options.instant ? Promise.resolve() : delay(ms))
 
   return {
-    async opening() {
-      await wait(700)
-      return '周末好。我们花五分钟，把这一周过一遍就好。\n\n先从最实在的开始 —— 这周主要忙了些什么？'
-    },
-
-    async wantsFollowUp(userText: string, state: InterviewState) {
+    async wantsFollowUp(userText: string, state: InterviewState, dim: Dimension) {
       await wait(320)
-      if (state.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION) return false
+      const p = blockProgress(state, dim)
+      if (p.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION) return false
       const t = userText.trim()
       if (t.length === 0) return false
+      // 「没有」这类回答没什么可追问的，直接换下一题
+      if (isNonAnswer(t)) return false
       // 答得越短、或明显带着卡顿情绪，越值得再问一句
       if (t.length < 20) return true
-      if (state.followUpCount < 1 && /卡|拖|没|难|烦|累|等/.test(t)) return true
+      if (p.followUpCount < 1 && /卡|拖|没|难|烦|累|等/.test(t)) return true
       return false
     },
 
-    async nextMessage(state: InterviewState, history: ChatMessage[]) {
+    async nextMessage(state: InterviewState, dim: Dimension, history: ChatMessage[]) {
       await wait(760)
-      const dim = currentDimension(state)
+      const p = blockProgress(state, dim)
+      const blockHistory = history.filter((m) => m.dimension === dim)
 
-      if (state.followUpCount > 0) {
-        return currentFollowUp(state)
+      // 这一块已经聊完
+      if (p.complete) {
+        const remaining = nextIncompleteBlock(state)
+        if (!remaining) return '四块都聊过了。可以生成你的本周梳理了。'
+        return `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(remaining)}」，还是先挑别的？`
       }
 
-      const question = currentQuestion(state)
-      const entering = startsNewBlock(state)
-      const isAbsoluteFirst = history.filter((m) => m.role === 'ai').length === 0
+      if (p.followUpCount > 0) return currentFollowUp(state, dim)
 
-      if (isAbsoluteFirst || !entering) return question
-      return `${LEADS[dim]}${question}`
+      const question = currentQuestion(state, dim)
+      const isBlockFirst = blockHistory.filter((m) => m.role === 'ai').length === 0
+      if (!isBlockFirst) return question
+      return `${OPENERS[dim]}${question}`
     },
 
     async summarize(history: ChatMessage[]): Promise<WeeklyResult> {
       await wait(1500)
       const byDim = groupAnswers(history)
-      const all = [...byDim.event, ...byDim.people, ...byDim.mood, ...byDim.closing]
+      const all = [...byDim.event, ...byDim.people, ...byDim.thing, ...byDim.mood]
       const result = createEmptyResult()
 
-      if (all.length === 0) {
+      if (all.filter((t) => !isNonAnswer(t)).length === 0) {
         result.events = ['（这次没有聊到具体的事情）']
         result.highlights = ['这一周还没有被梳理过']
         result.nextFocus = ['找个安静的时间，重新做一次梳理']
         return result
       }
 
-      // 事情
-      result.events = unique(byDim.event.map((t) => firstSentence(t, 50))).slice(0, 4)
-      if (result.events.length === 0) {
-        result.events = unique(byDim.closing.map((t) => firstSentence(t, 50))).slice(0, 2)
-      }
-
-      // 人际
-      const people: PersonNote[] = []
-      for (const t of byDim.people) {
-        people.push({ name: extractName(t), note: firstSentence(t, 40) })
-        if (people.length >= 3) break
-      }
-      result.people = dedupePeople(people)
-
-      // 悬着
-      result.pending = unique(
-        all.filter((t) => PENDING_RE.test(t)).map((t) => firstSentence(t, 40)),
-      ).slice(0, 4)
+      result.events = toItems(byDim.event, 4, 50)
+      result.people = buildPeople(byDim.people)
+      result.things = toItems(byDim.thing, 4)
+      result.pending = toItems(
+        all.filter((t) => PENDING_RE.test(t)),
+        4,
+        40,
+      )
 
       result.highlights = buildHighlights(result, byDim)
       result.nextFocus = buildNextFocus(result)
@@ -275,20 +311,29 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       const result = cloneResult(current)
 
       for (const part of splitSentences(note)) {
+        if (isNonAnswer(part)) continue
+
         const person = personHint(part)
         if (person) {
           result.people.push({ name: person, note: firstSentence(part, 40) })
           continue
         }
+
+        const item = firstSentence(part, 46)
         if (PENDING_RE.test(part)) {
-          result.pending.push(firstSentence(part, 40))
+          result.pending.push(item)
           continue
         }
-        result.events.push(firstSentence(part, 50))
+        if (THING_RE.test(part)) {
+          result.things.push(item)
+          continue
+        }
+        result.events.push(item)
       }
 
       result.events = unique(result.events)
       result.pending = unique(result.pending)
+      result.things = unique(result.things)
       result.people = dedupePeople(result.people)
 
       // 只重新生成「本周热点」和「下周计划」，清单内容保留用户的修改

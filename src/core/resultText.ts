@@ -34,6 +34,10 @@ export function resultToMarkdown(r: WeeklyResult): string {
   bulletList(lines, r.pending)
   lines.push('')
 
+  lines.push('**物品**')
+  bulletList(lines, r.things)
+  lines.push('')
+
   lines.push('## 本周热点', '')
   bulletList(lines, r.highlights)
   lines.push('')

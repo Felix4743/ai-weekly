@@ -13,6 +13,7 @@ function base(): WeeklyResult {
   return {
     events: ['改方案', '整理数据'],
     people: [{ name: '老王', note: '没拍板' }],
+    things: ['换键盘'],
     pending: ['报销没交'],
     highlights: ['方案难产'],
     nextFocus: ['定稿', '联系老王', '留整块时间'],
@@ -72,8 +73,17 @@ describe('结果页编辑操作', () => {
   it('编辑操作覆盖全部列表字段', () => {
     const r = base()
     expect(updateItem(r, 'highlights', 0, 'h').highlights[0]).toBe('h')
+    expect(updateItem(r, 'things', 0, '换显示器').things[0]).toBe('换显示器')
     expect(updateItem(r, 'nextFocus', 0, 'f').nextFocus[0]).toBe('f')
     expect(updateItem(r, 'nextFollowUps', 0, 'p').nextFollowUps[0]).toBe('p')
     expect(removeItem(r, 'nextFocus', 0).nextFocus).toEqual(['联系老王', '留整块时间'])
+    expect(removeItem(r, 'things', 0).things).toEqual([])
+  })
+
+  it('物品一栏和事情一栏互不干扰', () => {
+    const r = base()
+    const next = addItem(r, 'things', '处理旧手机')
+    expect(next.things).toEqual(['换键盘', '处理旧手机'])
+    expect(next.events).toEqual(r.events)
   })
 })

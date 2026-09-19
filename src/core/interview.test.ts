@@ -1,133 +1,161 @@
 import { describe, expect, it } from 'vitest'
 import {
-  askedMainQuestions,
+  answeredInBlock,
+  blockProgress,
+  closeBlock,
+  coveragePercent,
   createInterview,
-  currentDimension,
   currentFollowUp,
   currentQuestion,
-  forceFinish,
+  finishAll,
+  isAllComplete,
+  isBlockComplete,
+  isFollowUpTurn,
+  nextIncompleteBlock,
   nextStep,
-  progressPercent,
-  startsNewBlock,
+  openBlock,
+  questionsInBlock,
 } from './interview'
 import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT, TOTAL_MAIN_QUESTIONS } from './script'
-import type { InterviewState } from './types'
+import type { Dimension, InterviewState } from './types'
 
-const ALL_QUESTIONS = SCRIPT.flatMap((d) => d.mainQuestions)
-
-function runAll(followUp: boolean) {
-  let state = createInterview()
+/** 在某个区块里一路问到底 */
+function runBlock(state: InterviewState, dim: Dimension, followUp: boolean) {
   const asked: string[] = []
+  let s = state
   let guard = 0
-  while (!state.done && guard < 500) {
-    asked.push(currentQuestion(state))
-    state = nextStep(state, followUp)
+  while (!isBlockComplete(s, dim) && guard < 200) {
+    asked.push(currentQuestion(s, dim))
+    s = nextStep(s, dim, followUp)
     guard += 1
   }
-  return { state, asked }
+  return { state: s, asked }
 }
 
-describe('采访状态机', () => {
-  it('初始状态指向第一个区块的第一个问题', () => {
+describe('分块采访状态机', () => {
+  it('初始时每个区块都是空的，没有展开任何一块', () => {
     const s = createInterview()
-    expect(s).toEqual({ dimensionIndex: 0, askIndex: 0, followUpCount: 0, done: false })
-    expect(currentDimension(s)).toBe('event')
-    expect(currentQuestion(s)).toBe(SCRIPT[0].mainQuestions[0])
-    expect(progressPercent(s)).toBe(0)
-  })
-
-  it('不追问时，按脚本顺序逐题走完并结束', () => {
-    const { state, asked } = runAll(false)
-    expect(asked).toEqual(ALL_QUESTIONS)
-    expect(asked).toHaveLength(TOTAL_MAIN_QUESTIONS)
-    expect(state.done).toBe(true)
-  })
-
-  it('每次都要求追问时，每题追问次数被硬性限制', () => {
-    const { asked } = runAll(true)
-    expect(asked).toHaveLength(TOTAL_MAIN_QUESTIONS * (MAX_FOLLOWUPS_PER_QUESTION + 1))
-
-    const counts = new Map<string, number>()
-    for (const q of asked) counts.set(q, (counts.get(q) ?? 0) + 1)
-    for (const q of ALL_QUESTIONS) {
-      expect(counts.get(q)).toBe(MAX_FOLLOWUPS_PER_QUESTION + 1)
+    expect(s.active).toBeNull()
+    for (const d of SCRIPT) {
+      expect(blockProgress(s, d.key)).toEqual({ askIndex: 0, followUpCount: 0, complete: false })
     }
+    expect(coveragePercent(s)).toBe(0)
+    expect(isAllComplete(s)).toBe(false)
   })
 
-  it('追问到达上限后自动推进到下一题', () => {
+  it('可以自己展开某一块，也可以收起', () => {
     let s = createInterview()
+    s = openBlock(s, 'people')
+    expect(s.active).toBe('people')
+    expect(openBlock(s, 'people')).toBe(s)
 
-    s = nextStep(s, true)
-    expect(s.followUpCount).toBe(1)
-    expect(s.askIndex).toBe(0)
+    s = openBlock(s, 'thing')
+    expect(s.active).toBe('thing')
 
-    s = nextStep(s, true)
-    expect(s.followUpCount).toBe(2)
-    expect(s.askIndex).toBe(0)
-
-    s = nextStep(s, true)
-    expect(s.followUpCount).toBe(0)
-    expect(s.askIndex).toBe(1)
+    s = closeBlock(s)
+    expect(s.active).toBeNull()
+    expect(closeBlock(s)).toBe(s)
   })
 
-  it('AI 想追问但状态机已结束时不越界', () => {
+  it('不追问时按顺序走完一个区块，并自动收起', () => {
+    const started = openBlock(createInterview(), 'event')
+    const { state, asked } = runBlock(started, 'event', false)
+
+    expect(asked).toEqual(SCRIPT[0].mainQuestions)
+    expect(isBlockComplete(state, 'event')).toBe(true)
+    expect(state.active).toBeNull()
+  })
+
+  it('每次都要求追问时，追问次数被硬性限制', () => {
+    const { asked } = runBlock(openBlock(createInterview(), 'people'), 'people', true)
+    expect(asked).toHaveLength(SCRIPT[1].mainQuestions.length * (MAX_FOLLOWUPS_PER_QUESTION + 1))
+  })
+
+  it('区块之间互不影响，可以只聊其中一块', () => {
+    let s = openBlock(createInterview(), 'event')
+    s = nextStep(s, 'event', false)
+
+    expect(blockProgress(s, 'event').askIndex).toBe(1)
+    expect(blockProgress(s, 'people').askIndex).toBe(0)
+    expect(blockProgress(s, 'thing').askIndex).toBe(0)
+    expect(blockProgress(s, 'mood').askIndex).toBe(0)
+  })
+
+  it('区块聊完后不再推进', () => {
+    const { state } = runBlock(openBlock(createInterview(), 'mood'), 'mood', false)
+    expect(nextStep(state, 'mood', true)).toBe(state)
+  })
+
+  it('能区分「换题」和「追问」', () => {
+    let s = openBlock(createInterview(), 'thing')
+    expect(isFollowUpTurn(s, 'thing')).toBe(false)
+
+    s = nextStep(s, 'thing', true)
+    expect(isFollowUpTurn(s, 'thing')).toBe(true)
+    expect(currentFollowUp(s, 'thing').length).toBeGreaterThan(0)
+  })
+
+  it('能算出覆盖率，并指出下一块该聊什么', () => {
     let s = createInterview()
-    for (let i = 0; i < 100 && !s.done; i++) s = nextStep(s, false)
-    expect(s.done).toBe(true)
-    expect(nextStep(s, true)).toEqual(s)
+    expect(nextIncompleteBlock(s)).toBe('event')
+
+    s = runBlock(openBlock(s, 'event'), 'event', false).state
+    expect(answeredInBlock(s, 'event')).toBe(questionsInBlock('event'))
+    expect(nextIncompleteBlock(s)).toBe('people')
+    expect(isAllComplete(s)).toBe(false)
+
+    for (const d of SCRIPT) s = runBlock(s, d.key, false).state
+    expect(isAllComplete(s)).toBe(true)
+    expect(coveragePercent(s)).toBe(100)
+    expect(nextIncompleteBlock(s)).toBeNull()
   })
 
-  it('用户点「聊够了」可以随时提前收尾', () => {
-    const s = forceFinish(createInterview())
-    expect(s.done).toBe(true)
-    expect(progressPercent(s)).toBe(100)
-    expect(nextStep(s, true)).toEqual(s)
+  it('直接生成梳理时，所有区块都标记为结束', () => {
+    const s = finishAll(openBlock(createInterview(), 'event'))
+    expect(isAllComplete(s)).toBe(true)
+    expect(s.active).toBeNull()
   })
 
-  it('进度只增不减，并最终到达 100', () => {
+  it('覆盖全部主问题，一个都不漏', () => {
     let s = createInterview()
-    const seen = [progressPercent(s)]
-    let guard = 0
-    while (!s.done && guard < 100) {
-      s = nextStep(s, false)
-      seen.push(progressPercent(s))
-      guard += 1
+    const allAsked: string[] = []
+    for (const d of SCRIPT) {
+      const r = runBlock(s, d.key, false)
+      allAsked.push(...r.asked)
+      s = r.state
     }
-    expect(seen[0]).toBe(0)
+    expect(allAsked).toEqual(SCRIPT.flatMap((d) => d.mainQuestions))
+    expect(allAsked).toHaveLength(TOTAL_MAIN_QUESTIONS)
+  })
+
+  it('覆盖率只增不减，并最终到达 100', () => {
+    let s = createInterview()
+    const seen = [coveragePercent(s)]
+    for (const d of SCRIPT) {
+      let guard = 0
+      while (!isBlockComplete(s, d.key) && guard < 50) {
+        s = nextStep(s, d.key, false)
+        seen.push(coveragePercent(s))
+        guard += 1
+      }
+    }
     expect(seen[seen.length - 1]).toBe(100)
     for (let i = 1; i < seen.length; i++) {
       expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1])
     }
   })
 
-  it('能算出已问过的主问题数，并识别区块切换', () => {
-    expect(askedMainQuestions(createInterview())).toBe(0)
+  it('状态残缺或区块未知时不抛错', () => {
+    const wild = { active: null, blocks: {} } as unknown as InterviewState
+    expect(() => currentQuestion(wild, 'event')).not.toThrow()
+    expect(currentQuestion(wild, 'event')).toBe(SCRIPT[0].mainQuestions[0])
+    expect(() => currentFollowUp(wild, 'event')).not.toThrow()
 
-    const entering: InterviewState = {
-      dimensionIndex: 1,
-      askIndex: 0,
-      followUpCount: 0,
-      done: false,
-    }
-    expect(askedMainQuestions(entering)).toBe(SCRIPT[0].mainQuestions.length)
-    expect(startsNewBlock(entering)).toBe(true)
-    expect(startsNewBlock({ ...entering, followUpCount: 1 })).toBe(false)
-    expect(startsNewBlock({ ...entering, dimensionIndex: 0 })).toBe(false)
-  })
-
-  it('状态越界时不抛错，安全降级', () => {
-    const wild: InterviewState = { dimensionIndex: 99, askIndex: 99, followUpCount: 0, done: false }
-    expect(() => currentDimension(wild)).not.toThrow()
-    expect(currentQuestion(wild)).toBe('')
-    expect(currentFollowUp(wild)).toBe('')
-    expect(nextStep(wild, true).done).toBe(true)
-  })
-
-  it('追问话术池循环取用，不会越界', () => {
-    let s = createInterview()
-    for (let i = 0; i < MAX_FOLLOWUPS_PER_QUESTION; i++) {
-      s = nextStep(s, true)
-      expect(currentFollowUp(s).length).toBeGreaterThan(0)
-    }
+    const unknown = 'nope' as Dimension
+    expect(currentQuestion(wild, unknown)).toBe('')
+    expect(currentFollowUp(wild, unknown)).toBe('')
+    expect(nextStep(wild, unknown, true)).toBe(wild)
+    expect(questionsInBlock(unknown)).toBe(0)
+    expect(answeredInBlock(wild, unknown)).toBe(0)
   })
 })

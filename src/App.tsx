@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createMockAi, sampleAnswer } from './core/mockAi'
 import {
+  closeBlock,
   createInterview,
-  currentDimension,
-  forceFinish,
+  finishAll,
   nextStep,
-  progressPercent,
+  openBlock,
+  coveragePercent,
 } from './core/interview'
 import {
   createDefaultConfig,
@@ -67,13 +68,14 @@ export default function App() {
     if (busyRef.current) return
     busyRef.current = true
     commitMessages([])
-    commitInterview(createInterview())
+    const fresh = openBlock(createInterview(), 'event')
+    commitInterview(fresh)
     resultRef.current = null
     setResult(null)
     setRestored(false)
     setPage('chat')
     setTyping(true)
-    const text = await ai.opening()
+    const text = await ai.nextMessage(fresh, 'event', [])
     setTyping(false)
     commitMessages([aiMessage(text, 'event')])
     busyRef.current = false
@@ -97,43 +99,64 @@ export default function App() {
     setPage('result')
   }, [ai, commitResult])
 
+  /** 用户自己点开某一块；如果是第一次打开，让 AI 先开口 */
+  const handleOpenBlock = useCallback(
+    async (dim: Dimension) => {
+      if (busyRef.current) return
+      if (interviewRef.current.active === dim) return
+
+      const opened = openBlock(interviewRef.current, dim)
+      commitInterview(opened)
+
+      const alreadyAsked = messagesRef.current.some(
+        (m) => m.dimension === dim && m.role === 'ai',
+      )
+      if (alreadyAsked) return
+
+      busyRef.current = true
+      setTyping(true)
+      const text = await ai.nextMessage(opened, dim, messagesRef.current)
+      setTyping(false)
+      commitMessages([...messagesRef.current, aiMessage(text, dim)])
+      busyRef.current = false
+    },
+    [ai, commitInterview, commitMessages],
+  )
+
+  const handleCloseBlock = useCallback(() => {
+    commitInterview(closeBlock(interviewRef.current))
+  }, [commitInterview])
+
   const handleSend = useCallback(
     async (raw: string) => {
+      const dim = interviewRef.current.active
       const text = raw.trim()
-      if (!text || busyRef.current) return
+      if (!dim || !text || busyRef.current) return
       busyRef.current = true
       setTyping(true)
 
-      const dimension = currentDimension(interviewRef.current)
       commitMessages([
         ...messagesRef.current,
-        { id: nextId('u'), role: 'user', text, dimension, at: Date.now() },
+        { id: nextId('u'), role: 'user', text, dimension: dim, at: Date.now() },
       ])
 
-      const wantsFollowUp = await ai.wantsFollowUp(text, interviewRef.current)
-      const advanced = nextStep(interviewRef.current, wantsFollowUp)
+      const wantsFollowUp = await ai.wantsFollowUp(text, interviewRef.current, dim)
+      const advanced = nextStep(interviewRef.current, dim, wantsFollowUp)
       commitInterview(advanced)
 
-      if (advanced.done) {
-        setTyping(false)
-        busyRef.current = false
-        await runSummarize()
-        return
-      }
-
-      const nextText = await ai.nextMessage(advanced, messagesRef.current)
-      commitMessages([...messagesRef.current, aiMessage(nextText, currentDimension(advanced))])
+      const nextText = await ai.nextMessage(advanced, dim, messagesRef.current)
+      commitMessages([...messagesRef.current, aiMessage(nextText, dim)])
       setTyping(false)
       busyRef.current = false
     },
-    [ai, commitInterview, commitMessages, runSummarize],
+    [ai, commitInterview, commitMessages],
   )
 
-  const handleFinish = useCallback(async () => {
+  const handleGenerate = useCallback(async () => {
     if (busyRef.current) return
     busyRef.current = true
     setTyping(false)
-    commitInterview(forceFinish(interviewRef.current))
+    commitInterview(finishAll(interviewRef.current))
     await runSummarize()
     busyRef.current = false
   }, [commitInterview, runSummarize])
@@ -175,8 +198,14 @@ export default function App() {
     void startInterview()
   }, [startInterview])
 
-  const userAnswerCount = messages.filter((m) => m.role === 'user').length
-  const sampleText = sampleAnswer(currentDimension(interview), userAnswerCount)
+  const activeDim = interview.active
+  const sampleText = activeDim
+    ? sampleAnswer(
+        activeDim,
+        messages.filter((m) => m.role === 'user' && m.dimension === activeDim).length,
+      )
+    : ''
+  const hasAnyAnswer = messages.some((m) => m.role === 'user')
 
   return (
     <div className="app">
@@ -204,11 +233,14 @@ export default function App() {
           messages={messages}
           typing={typing}
           interview={interview}
-          progress={progressPercent(interview)}
+          progress={coveragePercent(interview)}
           busy={overlay !== null}
           sampleText={sampleText}
+          hasAnyAnswer={hasAnyAnswer}
+          onOpenBlock={handleOpenBlock}
+          onCloseBlock={handleCloseBlock}
           onSend={handleSend}
-          onFinish={handleFinish}
+          onGenerate={handleGenerate}
         />
       )}
 

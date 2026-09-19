@@ -5,6 +5,7 @@ import type { WeeklyResult } from './types'
 const FULL: WeeklyResult = {
   events: ['改了三版方案，还没定'],
   people: [{ name: '老王', note: '方案卡在他那儿没拍板' }],
+  things: ['想换键盘，挑了半个月没定'],
   pending: ['报销拖了两周没交'],
   highlights: ['方案难产是这周主线'],
   nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
@@ -14,6 +15,7 @@ const FULL: WeeklyResult = {
 const EMPTY: WeeklyResult = {
   events: [],
   people: [],
+  things: [],
   pending: [],
   highlights: [],
   nextFocus: [],
@@ -30,6 +32,7 @@ describe('结果导出为 Markdown', () => {
     expect(md).toContain('**事**')
     expect(md).toContain('**人**')
     expect(md).toContain('**悬着**')
+    expect(md).toContain('**物品**')
     expect(md).toContain('**三件重点**')
     expect(md).toContain('**要跟进的人**')
   })
@@ -47,7 +50,13 @@ describe('结果导出为 Markdown', () => {
 
   it('内容原样写入，不丢条目', () => {
     const md = resultToMarkdown(FULL)
-    for (const item of [...FULL.events, ...FULL.pending, ...FULL.highlights, ...FULL.nextFocus]) {
+    for (const item of [
+      ...FULL.events,
+      ...FULL.things,
+      ...FULL.pending,
+      ...FULL.highlights,
+      ...FULL.nextFocus,
+    ]) {
       expect(md).toContain(item)
     }
   })

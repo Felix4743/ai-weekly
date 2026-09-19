@@ -1,5 +1,5 @@
-/** 采访区块：事情 / 人际 / 状态 / 收尾 */
-export type Dimension = 'event' | 'people' | 'mood' | 'closing'
+/** 采访区块：事情 / 人际 / 物品 / 状态 */
+export type Dimension = 'event' | 'people' | 'thing' | 'mood'
 
 export type Role = 'ai' | 'user'
 
@@ -12,15 +12,26 @@ export interface ChatMessage {
   at: number
 }
 
-/** 采访进度状态机。纯数据，便于单测。 */
-export interface InterviewState {
-  /** 当前处在第几个区块 */
-  dimensionIndex: number
-  /** 当前区块内问到了第几个主问题 */
+/** 单个区块的进度 */
+export interface BlockProgress {
+  /** 当前问到该区块的第几个主问题 */
   askIndex: number
   /** 当前主问题上已经追问了几次 */
   followUpCount: number
-  done: boolean
+  /** 该区块是否已经聊完 */
+  complete: boolean
+}
+
+export type BlockProgressMap = Record<Dimension, BlockProgress>
+
+/**
+ * 采访进度状态机。纯数据，便于单测。
+ * 与线性流程的区别：每个区块各记各的进度，用户可以自由选择先聊哪一块。
+ */
+export interface InterviewState {
+  /** 当前展开的区块；null 表示回到区块列表 */
+  active: Dimension | null
+  blocks: BlockProgressMap
 }
 
 export interface PersonNote {
@@ -33,6 +44,8 @@ export interface WeeklyResult {
   events: string[]
   /** 人际 */
   people: PersonNote[]
+  /** 物品 */
+  things: string[]
   /** 悬而未决 */
   pending: string[]
   /** 本周热点 */
@@ -47,6 +60,7 @@ export function createEmptyResult(): WeeklyResult {
   return {
     events: [],
     people: [],
+    things: [],
     pending: [],
     highlights: [],
     nextFocus: [],

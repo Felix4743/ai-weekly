@@ -1,7 +1,13 @@
 import type { PersonNote, WeeklyResult } from './types'
 
 /** 单值列表的字段名（人际是对象列表，单独处理） */
-export type ListKey = 'events' | 'pending' | 'highlights' | 'nextFocus' | 'nextFollowUps'
+export type ListKey =
+  | 'events'
+  | 'things'
+  | 'pending'
+  | 'highlights'
+  | 'nextFocus'
+  | 'nextFollowUps'
 
 export function updateItem(
   result: WeeklyResult,

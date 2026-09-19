@@ -74,6 +74,7 @@ export function parseResult(raw: string): WeeklyResult {
   return {
     events: toStringArray(o.events ?? o.事情),
     people: toPeople(o.people ?? o.人际),
+    things: toStringArray(o.things ?? o.物品),
     pending: toStringArray(o.pending ?? o.悬而未决 ?? o.pendingItems),
     highlights: toStringArray(o.highlights ?? o.本周热点),
     nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
