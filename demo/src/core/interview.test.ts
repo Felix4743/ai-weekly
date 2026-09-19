@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   answeredInBlock,
   blockProgress,
-  closeBlock,
   coveragePercent,
   createInterview,
   currentFollowUp,
@@ -33,7 +32,7 @@ function runBlock(state: InterviewState, dim: Dimension, followUp: boolean) {
 }
 
 describe('分块采访状态机', () => {
-  it('初始时每个区块都是空的，没有展开任何一块', () => {
+  it('初始时每个区块都是空的，没有选中任何一块', () => {
     const s = createInterview()
     expect(s.active).toBeNull()
     for (const d of SCRIPT) {
@@ -43,7 +42,7 @@ describe('分块采访状态机', () => {
     expect(isAllComplete(s)).toBe(false)
   })
 
-  it('可以自己展开某一块，也可以收起', () => {
+  it('可以自己切到任意一块', () => {
     let s = createInterview()
     s = openBlock(s, 'people')
     expect(s.active).toBe('people')
@@ -51,19 +50,19 @@ describe('分块采访状态机', () => {
 
     s = openBlock(s, 'thing')
     expect(s.active).toBe('thing')
+    expect(s.active).toBe('thing')
 
-    s = closeBlock(s)
-    expect(s.active).toBeNull()
-    expect(closeBlock(s)).toBe(s)
+    s = openBlock(s, 'mood')
+    expect(s.active).toBe('mood')
   })
 
-  it('不追问时按顺序走完一个区块，并自动收起', () => {
+  it('不追问时按顺序走完一个区块，并停在这一块', () => {
     const started = openBlock(createInterview(), 'event')
     const { state, asked } = runBlock(started, 'event', false)
 
     expect(asked).toEqual(SCRIPT[0].mainQuestions)
     expect(isBlockComplete(state, 'event')).toBe(true)
-    expect(state.active).toBeNull()
+    expect(state.active).toBe('event')
   })
 
   it('每次都要求追问时，追问次数被硬性限制', () => {
@@ -113,7 +112,7 @@ describe('分块采访状态机', () => {
   it('直接生成梳理时，所有区块都标记为结束', () => {
     const s = finishAll(openBlock(createInterview(), 'event'))
     expect(isAllComplete(s)).toBe(true)
-    expect(s.active).toBeNull()
+    expect(s.active).toBe('event')
   })
 
   it('覆盖全部主问题，一个都不漏', () => {

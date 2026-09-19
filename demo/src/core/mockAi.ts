@@ -40,10 +40,10 @@ const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
     '好久没联系老同学了，总觉得该问候一下。',
   ],
   thing: [
-    '想换个键盘，现在这个用着不顺手，挑了半个月也没定下来。',
-    '旧手机一直扔在抽屉里，想处理掉但一直没腾出手。',
-    '桌面堆了一堆文件，看一次烦一次，就是不动手。',
-    '暂时没有，这周没顾上这些。',
+    '买了个新键盘，之前那个手感不行，纠结了半个月终于下单了。',
+    '把旧手机挂二手平台卖掉了，比想象中顺利。',
+    '冲动买了个显示器支架，装上一用发现其实用不上。',
+    '没有，这周没顾上这些。',
   ],
   mood: [
     '挺累的，主要就是方案反复改这件事拖着，心里一直不踏实。',
@@ -152,8 +152,8 @@ function toItems(answers: string[], max: number, length = 46): string[] {
 
 const PENDING_RE = /没|拖|卡|忘|还没|来不及|延期|一直|等着|干等|悬/
 const WIN_RE = /顺利|搞定|完成|通过|终于|解决|拿下|谈成/
-/** 补充内容里出现这些词，认为是在说「东西」 */
-const THING_RE = /买|换|修|扔|处理掉|清理|桌面|下单|到货|退货|物件|东西/
+/** 补充内容里出现这些词，认为是在说「买了 / 处理了什么东西」 */
+const THING_RE = /买|换|下单|到货|退货|卖|处理掉|扔掉|添置|入手|物件|东西/
 
 function cloneResult(r: WeeklyResult): WeeklyResult {
   return {
@@ -177,7 +177,7 @@ function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]
   if (win) highlights.push(`${firstSentence(win, 36)}，值得记一笔`)
   if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还悬着，下周需要一个交代`)
   if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
-  if (result.things[0]) highlights.push(`${result.things[0]} —— 一直想弄，还没动手`)
+  if (result.things[0]) highlights.push(`${firstSentence(result.things[0], 32)} —— 这周和「东西」有关的一笔`)
   if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)
 
   return unique(highlights).slice(0, 5)
@@ -195,11 +195,7 @@ function buildNextFocus(result: WeeklyResult): string[] {
   focus.push(
     result.people[0] ? `主动联系 ${result.people[0].name}，把话说开` : '把欠下的那次联系补上',
   )
-  focus.push(
-    result.things[0]
-      ? `把「${firstSentence(result.things[0], 18)}」了结掉`
-      : '给自己留一段不被打断的时间，处理一直往后拖的那件事',
-  )
+  focus.push('给自己留一段不被打断的时间，处理一直往后拖的那件事')
   return unique(focus).slice(0, 3)
 }
 

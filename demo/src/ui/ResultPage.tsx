@@ -100,13 +100,13 @@ export function ResultPage({
 
       <section className="card">
         <h2 className="card-title">物品</h2>
-        <p className="card-desc">想买的、要处理的、一直堆着的</p>
+        <p className="card-desc">这周买了什么、处理掉了什么</p>
         <EditableList
           items={result.things}
           onChange={setList('things')}
-          placeholder="想买什么、要处理什么…"
+          placeholder="买了什么、卖掉了什么…"
           addLabel="添加一样东西"
-          emptyText="（这次没有聊到东西）"
+          emptyText="（这周没有添置或处理东西）"
         />
       </section>
 

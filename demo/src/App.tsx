@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createMockAi, sampleAnswer } from './core/mockAi'
 import {
-  closeBlock,
+  coveragePercent,
   createInterview,
   finishAll,
   nextStep,
   openBlock,
-  coveragePercent,
 } from './core/interview'
 import {
   createDefaultConfig,
@@ -123,10 +122,6 @@ export default function App() {
     [ai, commitInterview, commitMessages],
   )
 
-  const handleCloseBlock = useCallback(() => {
-    commitInterview(closeBlock(interviewRef.current))
-  }, [commitInterview])
-
   const handleSend = useCallback(
     async (raw: string) => {
       const dim = interviewRef.current.active
@@ -238,7 +233,6 @@ export default function App() {
           sampleText={sampleText}
           hasAnyAnswer={hasAnyAnswer}
           onOpenBlock={handleOpenBlock}
-          onCloseBlock={handleCloseBlock}
           onSend={handleSend}
           onGenerate={handleGenerate}
         />

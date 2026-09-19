@@ -20,16 +20,11 @@ export function blockProgress(s: InterviewState, dim: Dimension): BlockProgress 
   return s.blocks[dim] ?? EMPTY_PROGRESS
 }
 
-/* ---------------- 展开 / 收起 ---------------- */
+/* ---------------- 切换区块 ---------------- */
 
 export function openBlock(s: InterviewState, dim: Dimension): InterviewState {
   if (s.active === dim) return s
   return { ...s, active: dim }
-}
-
-export function closeBlock(s: InterviewState): InterviewState {
-  if (s.active === null) return s
-  return { ...s, active: null }
 }
 
 /* ---------------- 当前该问什么 ---------------- */
@@ -85,10 +80,9 @@ export function nextStep(
     }
   }
 
-  // 这一块聊完了，收起区块让用户自己挑下一块
+  // 这一块聊完了，但保持它仍然是当前展开的块
   return {
     ...s,
-    active: null,
     blocks: { ...s.blocks, [dim]: { ...p, followUpCount: 0, complete: true } },
   }
 }
@@ -97,7 +91,7 @@ export function nextStep(
 export function finishAll(s: InterviewState): InterviewState {
   const blocks = {} as BlockProgressMap
   for (const d of SCRIPT) blocks[d.key] = { ...blockProgress(s, d.key), complete: true }
-  return { active: null, blocks }
+  return { active: s.active, blocks }
 }
 
 /* ---------------- 进度与统计 ---------------- */

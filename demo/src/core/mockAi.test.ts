@@ -29,9 +29,9 @@ const FULL_HISTORY: ChatMessage[] = [
   msg('ai', '好，说说人。这周跟谁打交道最多？', 'people'),
   msg('user', '主要是跟老王对接方案，还有跟小李吃了顿饭。', 'people'),
   msg('user', '想约张总聊聊明年的方向，但一直没敢开口。', 'people'),
-  msg('ai', '再说说东西 —— 这周有没有和「东西」有关的事？', 'thing'),
-  msg('user', '想换个键盘，现在这个用着不顺手，挑了半个月也没定下来。', 'thing'),
-  msg('user', '暂时没有，这周没顾上这些。', 'thing'),
+  msg('ai', '再说说东西 —— 这周买了什么、或者添置了什么东西？', 'thing'),
+  msg('user', '买了个新键盘，之前那个手感不行，纠结了半个月终于下单了。', 'thing'),
+  msg('user', '没有，这周没顾上这些。', 'thing'),
   msg('ai', '换个角度。这周整体感觉怎么样，累不累？', 'mood'),
   msg('user', '挺累的，主要就是方案反复改这件事拖着。', 'mood'),
 ]
@@ -84,7 +84,7 @@ describe('演示用假 AI · 对话', () => {
 
   it('「没有」这类回答不追问，空回答也不追问', async () => {
     const s = createInterview()
-    expect(await ai.wantsFollowUp('暂时没有，这周没顾上这些。', s, 'thing')).toBe(false)
+    expect(await ai.wantsFollowUp('没有，这周没顾上这些。', s, 'thing')).toBe(false)
     expect(await ai.wantsFollowUp('   ', s, 'event')).toBe(false)
   })
 
@@ -138,9 +138,9 @@ describe('演示用假 AI · 结果生成', () => {
     expect(r.things.join(' ')).toContain('键盘')
   })
 
-  it('「暂时没有」这类回答不会被当成一条物品记录', async () => {
+  it('「没有」这类回答不会被当成一条物品记录', async () => {
     const r = await ai.summarize(FULL_HISTORY)
-    expect(r.things.join(' ')).not.toContain('暂时没有')
+    expect(r.things.join(' ')).not.toContain('没有')
   })
 
   it('给出热点与三条下周建议', async () => {
