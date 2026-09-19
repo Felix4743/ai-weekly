@@ -1,6 +1,6 @@
 import { AiError, describeFailure } from '../core/aiError'
 import type { ChatRequest, ChatTransport } from '../core/chatTransport'
-import { createSseParser, extractMessageText } from '../core/sse'
+import { readChatResponse } from '../shared/chatStream'
 
 /**
  * 浏览器实现：用 fetch 直接打接口，边收边解析 SSE。
@@ -27,26 +27,6 @@ export function resolveChatUrl(baseUrl: string, dev: boolean): string {
   const base = baseUrl.trim().replace(/\/+$/, '')
   if (dev) return '/llm-proxy/chat/completions'
   return `${base}/chat/completions`
-}
-
-async function readAll(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value) {
-      chunks.push(value)
-      total += value.length
-    }
-  }
-  const out = new Uint8Array(total)
-  let at = 0
-  for (const c of chunks) {
-    out.set(c, at)
-    at += c.length
-  }
-  return out
 }
 
 export function createBrowserTransport(options: BrowserTransportOptions = {}): ChatTransport {
@@ -96,45 +76,10 @@ export function createBrowserTransport(options: BrowserTransportOptions = {}): C
           throw new AiError(describeFailure(res.status, body), body.slice(0, 400))
         }
 
-        const reader = res.body?.getReader?.()
-        if (!reader) {
-          const full = extractMessageText(await res.text())
-          if (!full) throw new AiError('模型没有返回任何内容，请再试一次')
-          onDelta?.(full)
-          return full
-        }
-
-        const contentType = res.headers?.get?.('content-type') ?? ''
-        const decoder = new TextDecoder()
-
-        // 有些网关即使 stream=true 也会把整段一次性返回
-        if (!contentType.includes('text/event-stream')) {
-          const raw = decoder.decode(await readAll(reader), { stream: false })
-          const full = extractMessageText(raw) ?? raw.trim()
-          if (!full) throw new AiError('模型没有返回任何内容，请再试一次')
-          onDelta?.(full)
-          return full
-        }
-
-        const parser = createSseParser()
-        let out = ''
-        const push = (deltas: string[]): void => {
-          for (const d of deltas) {
-            out += d
-            onDelta?.(d)
-          }
-        }
-
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          // 必须用流式解码：一个汉字可能被切在相邻两个 chunk 里
-          if (value) push(parser.push(decoder.decode(value, { stream: true })))
-        }
-        push(parser.end())
-
-        if (!out) throw new AiError('模型没有返回任何内容，请再试一次')
-        return out
+        // 响应怎么读（SSE 逐段 / 网关整段返回 JSON）与主进程那份共用一套规则，
+        // 「一个汉字被切在两个包里」这类坑只需要在一个地方处理对
+        const { text } = await readChatResponse(res, onDelta)
+        return text
       } finally {
         clearTimeout(timer)
         req.signal?.removeEventListener('abort', onOuterAbort)
