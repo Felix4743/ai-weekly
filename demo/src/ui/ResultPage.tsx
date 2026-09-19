@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resultToMarkdown } from '../core/resultText'
 import type { ListKey } from '../core/resultEdit'
+import {
+  SECTION_KEYS,
+  activeSection,
+  buildOutline,
+  sectionDomId,
+  targetScrollTop,
+  type SectionKey,
+} from '../core/outline'
 import type { ChatMessage, PersonNote, WeeklyResult } from '../core/types'
 import { EditableList, EditablePeople } from './EditableList'
 
@@ -28,8 +36,72 @@ export function ResultPage({
   const [copied, setCopied] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [note, setNote] = useState('')
+  const [current, setCurrent] = useState<SectionKey>(SECTION_KEYS[0])
 
+  const scrollerRef = useRef<HTMLElement>(null)
+  const navRef = useRef<HTMLElement>(null)
+  /** 刚点过目录时钉住的那一项，避免滚动到底后又被判定成最后一块 */
+  const pinnedRef = useRef<SectionKey | null>(null)
+
+  const outline = useMemo(() => buildOutline(result), [result])
   const markdown = resultToMarkdown(result)
+
+  /** 吸顶目录栏遮住的高度，跳转和判定都以它为准 */
+  const navOffset = () => (navRef.current?.offsetHeight ?? 0) + 12
+
+  const jumpTo = useCallback((key: SectionKey) => {
+    const scroller = scrollerRef.current
+    const target = document.getElementById(sectionDomId(key))
+    if (!scroller || !target) return
+    const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    pinnedRef.current = key
+    scroller.scrollTo({
+      top: targetScrollTop(top, scroller.scrollTop, navOffset()),
+      behavior: 'smooth',
+    })
+    setCurrent(key)
+  }, [])
+
+  // 滚动时把目录里对应的那一项点亮
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+
+    const sync = () => {
+      // 自己点出来的高亮先留着，等用户真的自己滚动了再交还给滚动判定
+      if (pinnedRef.current) return
+
+      const containerTop = scroller.getBoundingClientRect().top
+      const offsets = SECTION_KEYS.map((key) => {
+        const el = document.getElementById(sectionDomId(key))
+        return { key, top: el ? el.getBoundingClientRect().top - containerTop : 0 }
+      })
+      const scrollable = scroller.scrollHeight - scroller.clientHeight > 4
+      const atBottom =
+        scrollable && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+      const next = activeSection(offsets, { threshold: navOffset(), atBottom })
+      if (next) setCurrent((prev) => (prev === next ? prev : next))
+    }
+
+    const release = () => {
+      pinnedRef.current = null
+    }
+    const releaseEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+
+    sync()
+    scroller.addEventListener('scroll', sync, { passive: true })
+    window.addEventListener('resize', sync)
+    for (const type of releaseEvents) {
+      window.addEventListener(type, release, { passive: true })
+    }
+    return () => {
+      scroller.removeEventListener('scroll', sync)
+      window.removeEventListener('resize', sync)
+      for (const type of releaseEvents) {
+        window.removeEventListener(type, release)
+      }
+    }
+  }, [])
 
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
@@ -59,7 +131,7 @@ export function ResultPage({
   }
 
   return (
-    <main className="page result">
+    <main className="page result" ref={scrollerRef}>
       <div className="result-head">
         <div>
           <h1 className="result-title">本周梳理</h1>
@@ -80,7 +152,26 @@ export function ResultPage({
         </div>
       </div>
 
-      <section className="card">
+      {/* 内容比较长，顶部放一条目录，点一下就跳到对应那一栏 */}
+      <nav className="outline-bar" ref={navRef} aria-label="本周梳理目录">
+        <span className="outline-hint">快速跳到</span>
+        {outline.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            className={`outline-item${current === entry.key ? ' active' : ''}${
+              entry.count === 0 ? ' blank' : ''
+            }`}
+            aria-current={current === entry.key ? 'true' : undefined}
+            onClick={() => jumpTo(entry.key)}
+          >
+            {entry.label}
+            {entry.count > 0 && <span className="outline-count">{entry.count}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <section className="card" id={sectionDomId('events')}>
         <h2 className="card-title">事情</h2>
         <p className="card-desc">这周都忙了些什么</p>
         <EditableList
@@ -92,13 +183,13 @@ export function ResultPage({
         />
       </section>
 
-      <section className="card">
+      <section className="card" id={sectionDomId('people')}>
         <h2 className="card-title">人际</h2>
         <p className="card-desc">这周和谁有关，卡在了哪里</p>
         <EditablePeople items={result.people} onChange={setPeople} />
       </section>
 
-      <section className="card">
+      <section className="card" id={sectionDomId('things')}>
         <h2 className="card-title">物品</h2>
         <p className="card-desc">这周买了什么、处理掉了什么</p>
         <EditableList
@@ -110,7 +201,7 @@ export function ResultPage({
         />
       </section>
 
-      <section className="card">
+      <section className="card" id={sectionDomId('pending')}>
         <h2 className="card-title">悬着</h2>
         <p className="card-desc">还没做完、一直拖着的事</p>
         <EditableList
@@ -122,7 +213,7 @@ export function ResultPage({
         />
       </section>
 
-      <section className="card highlight-card">
+      <section className="card highlight-card" id={sectionDomId('highlights')}>
         <h2 className="card-title">本周热点</h2>
         <p className="card-desc">这一周真正值得记住的几件事</p>
         <EditableList
@@ -134,7 +225,7 @@ export function ResultPage({
         />
       </section>
 
-      <section className="card plan-card">
+      <section className="card plan-card" id={sectionDomId('plan')}>
         <h2 className="card-title">
           下周计划
           <span className="badge-ai">AI 建议</span>

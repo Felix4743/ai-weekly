@@ -605,6 +605,77 @@ body {
   gap: 10px;
 }
 
+/* ---------- 结果页目录：吸顶，点一下就跳到那一栏 ---------- */
+
+.outline-bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: -4px -24px 0;
+  padding: 9px 24px;
+  background: rgba(250, 249, 247, 0.93);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.outline-hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-right: 2px;
+}
+
+.outline-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.outline-item:hover {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.outline-item.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* 还没写到内容的栏，虚线表示是空的，但仍然可以跳过去补 */
+.outline-item.blank:not(.active) {
+  border-style: dashed;
+  color: var(--ink-3);
+}
+
+.outline-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  background: var(--line-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.outline-item.active .outline-count {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--line-soft);
