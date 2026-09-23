@@ -4,8 +4,11 @@ dist-electron/
 release/
 .npm-cache/
 .electron-cache/
-# 打包出来后有人装在仓库里的那一份（几百 MB，不进版本库）
-mvp/
+# mvp/ 默认整块忽略：这地方以前放过一份装好的应用（几百 MB 的 Electron）。
+# 只放行归档快照本身 —— 那是 git archive 出来的纯源码，要进版本库。
+mvp/*
+!mvp/README.md
+!mvp/mvp-v0.5/
 *.local
 .DS_Store
 *.log
