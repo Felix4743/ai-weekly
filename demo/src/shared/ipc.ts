@@ -21,6 +21,8 @@ export const IPC = {
   loadSession: 'store:load-session',
   saveSession: 'store:save-session',
   clearSession: 'store:clear-session',
+  loadArchive: 'store:load-archive',
+  saveArchive: 'store:save-archive',
 } as const
 
 export interface LlmSendPayload {
@@ -60,5 +62,8 @@ export interface AiWeeklyBridge {
     loadSession(): unknown
     saveSession(session: unknown): void
     clearSession(): void
+    /** 按周归档的结果；同样同步读，总览页要一进去就画得出来 */
+    loadArchive(): unknown
+    saveArchive(list: unknown): void
   }
 }

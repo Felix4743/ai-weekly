@@ -10,7 +10,7 @@ import {
 /**
  * 预加载脚本：渲染进程与主进程之间唯一的门。
  *
- * 只开四个口子（发请求 / 取消 / 读存储 / 写存储），其余一律不给 ——
+ * 只开五个口子（发请求 / 取消 / 读存储 / 写存储），其余一律不给 ——
  * 渲染进程拿不到 Node，也拿不到任意 IPC 通道。
  *
  * 增量文本用「请求标识」过滤：同一时间可能有好几次请求在跑，
@@ -50,6 +50,10 @@ const bridge: AiWeeklyBridge = {
     },
     clearSession: (): void => {
       ipcRenderer.send(IPC.clearSession)
+    },
+    loadArchive: (): unknown => ipcRenderer.sendSync(IPC.loadArchive),
+    saveArchive: (list: unknown): void => {
+      ipcRenderer.send(IPC.saveArchive, list)
     },
   },
 }

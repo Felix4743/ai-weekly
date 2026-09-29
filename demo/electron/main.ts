@@ -77,11 +77,15 @@ function wireIpc(): void {
   ipcMain.on(IPC.loadSession, (event) => {
     event.returnValue = store.loadSession()
   })
+  ipcMain.on(IPC.loadArchive, (event) => {
+    event.returnValue = store.loadArchive()
+  })
 
   // 写不需要回执，不阻塞界面
   ipcMain.on(IPC.saveConfig, (_event, config: unknown) => store.saveConfig(config))
   ipcMain.on(IPC.saveSession, (_event, session: unknown) => store.saveSession(session))
   ipcMain.on(IPC.clearSession, () => store.clearSession())
+  ipcMain.on(IPC.saveArchive, (_event, list: unknown) => store.saveArchive(list))
 }
 
 void app.whenReady().then(() => {

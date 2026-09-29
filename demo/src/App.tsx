@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeError } from './core/aiError'
+import { archiveResult, upsertWeek, type WeekEntry } from './core/archive'
 import { createAiClient } from './core/createAiClient'
 import {
   coveragePercent,
@@ -19,17 +20,44 @@ import {
   type InterviewState,
   type WeeklyResult,
 } from './core/types'
-import { loadConfig, loadSession, saveConfig, saveSession } from './storage'
+import { weekKeyOf, type WeekKey } from './core/week'
+import {
+  loadArchive,
+  loadConfig,
+  loadSession,
+  saveArchive,
+  saveConfig,
+  saveSession,
+} from './storage'
 import { createTransport } from './transport'
 import { SetupPage } from './ui/SetupPage'
 import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
+import { HistoryPage } from './ui/HistoryPage'
 
-type Page = 'setup' | 'chat' | 'result'
+type Page = 'setup' | 'chat' | 'result' | 'history'
 type Overlay = { title: string; sub: string } | null
 
 function aiMessage(text: string, dimension: Dimension): ChatMessage {
   return { id: nextId('a'), role: 'ai', text, dimension, at: Date.now() }
+}
+
+/**
+ * 首次进入时把周归档读出来。
+ *
+ * 升级上来的用户只存过「最近一次会话」，归档还是空的 —— 那一次的结果
+ * 按理也该在日历上占一个位置，所以这里补录一次（只在归档为空时做，
+ * 免得以后每次启动都把已经删过的记录又冒出来）。
+ */
+function bootArchive(): WeekEntry[] {
+  const stored = loadArchive()
+  if (stored.length > 0) return stored
+
+  const session = loadSession()
+  if (!session) return []
+  const backfilled = archiveResult([], session.result, session.savedAt, session.week)
+  saveArchive(backfilled)
+  return backfilled
 }
 
 /** 流式刷新间隔：模型吐字很快，攒一下再刷，避免一秒几十次重渲染 */
@@ -50,6 +78,10 @@ export default function App() {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [result, setResult] = useState<WeeklyResult | null>(null)
   const [restored, setRestored] = useState(false)
+  /** 按周归档的结果，总览页与「这份结果记在哪一周」都从这里读 */
+  const [archive, setArchive] = useState<WeekEntry[]>(() => bootArchive())
+  /** 当前这份结果属于哪一周；生成那一刻定下来，之后编辑、重新整理都跟着它走 */
+  const [resultWeek, setResultWeek] = useState<WeekKey>(() => weekKeyOf(new Date()))
   /** 从哪一页点进设置的：回去时要还给他，改设置不该等于重开 */
   const [cameFrom, setCameFrom] = useState<Page | null>(null)
 
@@ -62,6 +94,8 @@ export default function App() {
   const messagesRef = useRef<ChatMessage[]>([])
   const interviewRef = useRef<InterviewState>(interview)
   const resultRef = useRef<WeeklyResult | null>(null)
+  const archiveRef = useRef<WeekEntry[]>(archive)
+  const resultWeekRef = useRef<WeekKey>(resultWeek)
   const busyRef = useRef(false)
   const streamRef = useRef('')
   const flushTimer = useRef<number | null>(null)
@@ -76,11 +110,38 @@ export default function App() {
     setInterview(next)
   }, [])
 
-  const commitResult = useCallback((next: WeeklyResult) => {
-    resultRef.current = next
-    setResult(next)
-    saveSession({ messages: messagesRef.current, result: next, savedAt: Date.now() })
+  const commitArchive = useCallback((next: WeekEntry[]) => {
+    archiveRef.current = next
+    setArchive(next)
+    saveArchive(next)
   }, [])
+
+  const commitResultWeek = useCallback((week: WeekKey) => {
+    resultWeekRef.current = week
+    setResultWeek(week)
+  }, [])
+
+  /**
+   * 结果一改就落两处：最近一次会话（刷新不丢）+ 它所属那一周的归档（总览看得到）。
+   * 两道落盘都在这儿，是因为「结果变了」只有一个入口，散出去必然漏一处。
+   */
+  const commitResult = useCallback(
+    (next: WeeklyResult) => {
+      resultRef.current = next
+      setResult(next)
+      const at = Date.now()
+      saveSession({
+        messages: messagesRef.current,
+        result: next,
+        savedAt: at,
+        week: resultWeekRef.current,
+      })
+      commitArchive(
+        upsertWeek(archiveRef.current, { week: resultWeekRef.current, savedAt: at, result: next }),
+      )
+    },
+    [commitArchive],
+  )
 
   /* ---------------- 流式累积 ---------------- */
 
@@ -115,6 +176,8 @@ export default function App() {
     resultRef.current = null
     setResult(null)
     setRestored(false)
+    // 新的一轮从今天算起；上一份结果属于哪一周，到这里为止
+    commitResultWeek(weekKeyOf(new Date()))
     setPage('chat')
     setTyping(true)
     try {
@@ -128,7 +191,7 @@ export default function App() {
       setTyping(false)
       busyRef.current = false
     }
-  }, [ai, commitInterview, commitMessages, pushDelta, resetStream])
+  }, [ai, commitInterview, commitMessages, commitResultWeek, pushDelta, resetStream])
 
   // 首次挂载：若已配置过则直接进入对话
   const bootedRef = useRef(false)
@@ -144,6 +207,8 @@ export default function App() {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
     try {
       const r = await ai.summarize(messagesRef.current)
+      // 生成的那一刻定下它属于哪一周 —— 之后再编辑、重新整理都跟着这一周走
+      commitResultWeek(weekKeyOf(new Date()))
       commitResult(r)
       setError(null)
       setPage('result')
@@ -152,7 +217,7 @@ export default function App() {
     } finally {
       setOverlay(null)
     }
-  }, [ai, commitResult])
+  }, [ai, commitResult, commitResultWeek])
 
   /** 用户自己点开某一块；如果是第一次打开，让 AI 先开口 */
   const handleOpenBlock = useCallback(
@@ -265,6 +330,17 @@ export default function App() {
     setPage('setup')
   }, [page])
 
+  const openHistory = useCallback(() => {
+    // 和设置一样记住来路：从结果页点进总览的，返回时该回到结果页
+    setCameFrom(page)
+    setPage('history')
+  }, [page])
+
+  const leaveHistory = useCallback(() => {
+    setPage(cameFrom && cameFrom !== 'history' ? cameFrom : 'chat')
+    setCameFrom(null)
+  }, [cameFrom])
+
   const leaveSetup = useCallback(() => {
     setPage(cameFrom ?? 'chat')
     setCameFrom(null)
@@ -275,10 +351,12 @@ export default function App() {
     if (!saved) return
     resultRef.current = saved.result
     setResult(saved.result)
+    // 恢复的是哪一周的结果，就接着算哪一周：否则改两笔就会串到本周名下
+    commitResultWeek(saved.week)
     commitMessages(saved.messages)
     setRestored(true)
     setPage('result')
-  }, [commitMessages])
+  }, [commitMessages, commitResultWeek])
 
   const handleRestart = useCallback(() => {
     void startInterview()
@@ -304,6 +382,11 @@ export default function App() {
           </span>
         </div>
         <div className="topbar-right">
+          {page !== 'setup' && page !== 'history' && (
+            <button className="link-btn" type="button" onClick={openHistory}>
+              总览
+            </button>
+          )}
           {page !== 'setup' && (
             <button className="link-btn" type="button" onClick={openSetup}>
               设置
@@ -353,10 +436,21 @@ export default function App() {
           messages={messages}
           restored={restored}
           refining={overlay !== null}
+          week={resultWeek}
           onResultChange={commitResult}
           onRefine={handleRefine}
           onRestart={handleRestart}
           onBack={() => setPage('chat')}
+          onOpenHistory={openHistory}
+        />
+      )}
+
+      {page === 'history' && (
+        <HistoryPage
+          archive={archive}
+          onArchiveChange={commitArchive}
+          onBack={leaveHistory}
+          onStart={handleRestart}
         />
       )}
 

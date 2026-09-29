@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { WeekEntry } from '../core/archive'
 import { defaultPersonaPrompt, PERSONA_PRESETS } from '../core/persona'
 import { createDefaultConfig, type AppConfig } from '../core/types'
 import type { AiWeeklyBridge } from '../shared/ipc'
 import { selectStore } from './index'
 import { createIpcStore } from './ipcStore'
 import { createLocalStore } from './localStore'
-import { normalizeConfig, normalizePersona, normalizeSession, type SavedSession } from './shape'
+import {
+  normalizeArchive,
+  normalizeConfig,
+  normalizePersona,
+  normalizeSession,
+  type SavedSession,
+} from './shape'
 
 /**
  * 存储这一层要回答两个问题：
@@ -32,7 +39,21 @@ const GOOD_SESSION: SavedSession = {
     nextFollowUps: [],
   },
   savedAt: 123,
+  week: '2026-09-21',
 }
+
+const GOOD_ARCHIVE: WeekEntry[] = [
+  {
+    week: '2026-09-21',
+    savedAt: 200,
+    result: { ...GOOD_SESSION.result, pending: ['报销拖了两周'] },
+  },
+  {
+    week: '2026-09-14',
+    savedAt: 100,
+    result: { ...GOOD_SESSION.result, highlights: ['上一周的主线'] },
+  },
+]
 
 describe('存储 · 形状归一化', () => {
   it('配置缺字段时补默认值而不是整块丢掉', () => {
@@ -90,6 +111,74 @@ describe('存储 · 形状归一化', () => {
     expect(typeof session?.savedAt).toBe('number')
     expect(session?.savedAt).toBeGreaterThan(0)
   })
+
+  describe('周归档的归一化', () => {
+    it('坏掉的条目逐条丢掉，不连累另外几十周', () => {
+      const list = normalizeArchive([
+        GOOD_ARCHIVE[0],
+        null,
+        '一整条字符串',
+        { week: '2026-09-22', result: {} }, // 周二，不是一周的起点
+        { week: '2026-09-07' }, // 没有 result
+        { week: '2026-08-31', result: { events: ['留着'] } },
+      ])
+      expect(list.map((e) => e.week)).toEqual(['2026-09-21', '2026-08-31'])
+      expect(list[1].result.events).toEqual(['留着'])
+    })
+
+    it('整个文件不是数组、或者干脆是坏的，都当空存档', () => {
+      expect(normalizeArchive(null)).toEqual([])
+      expect(normalizeArchive('{半截')).toEqual([])
+      expect(normalizeArchive({ week: '2026-09-21' })).toEqual([])
+    })
+
+    it('结果字段缺失时补成空数组，而不是让总览页崩掉', () => {
+      const list = normalizeArchive([{ week: '2026-09-21', result: { events: ['只有这一项'] } }])
+      expect(list[0].result).toMatchObject({
+        events: ['只有这一项'],
+        people: [],
+        highlights: [],
+        nextFollowUps: [],
+      })
+    })
+
+    it('读回来就是新的在前，缺时间戳的补一个', () => {
+      const list = normalizeArchive([...GOOD_ARCHIVE].reverse())
+      expect(list.map((e) => e.week)).toEqual(['2026-09-21', '2026-09-14'])
+      expect(normalizeArchive([{ week: '2026-09-21', result: {} }])[0].savedAt).toBeGreaterThan(0)
+    })
+
+    it('同一周出现两条时只留一条，不给日历画出两行', () => {
+      const list = normalizeArchive([
+        { week: '2026-09-21', savedAt: 1, result: { highlights: ['旧的'] } },
+        { week: '2026-09-21', savedAt: 2, result: { highlights: ['新的'] } },
+      ])
+      expect(list).toHaveLength(1)
+      expect(list[0].result.highlights).toEqual(['新的'])
+    })
+  })
+
+  describe('旧存档（M7 之前没有周归档）', () => {
+    it('会话里没有 week 时按保存时间推一个，而不是算到本周头上', () => {
+      // 2026-09-22 12:00 保存 → 归到 09-21 那一周
+      const at = new Date(2026, 8, 22, 12).getTime()
+      expect(normalizeSession({ messages: [], result: {}, savedAt: at })?.week).toBe('2026-09-21')
+      // 周日晚上算的还是这一周，不会提前跳到下一周
+      const sunday = new Date(2026, 8, 27, 23).getTime()
+      expect(normalizeSession({ messages: [], result: {}, savedAt: sunday })?.week).toBe('2026-09-21')
+    })
+
+    it('存了个坏掉的 week 时重新推，不采信', () => {
+      const at = new Date(2026, 8, 22, 12).getTime()
+      expect(normalizeSession({ messages: [], result: {}, savedAt: at, week: '上周' })?.week).toBe(
+        '2026-09-21',
+      )
+    })
+
+    it('归档文件还不存在时返回空数组，总览页照常打得开', () => {
+      expect(normalizeArchive(undefined)).toEqual([])
+    })
+  })
 })
 
 describe('存储 · 主进程那条路（IPC）', () => {
@@ -104,6 +193,8 @@ describe('存储 · 主进程那条路（IPC）', () => {
       loadSession: () => GOOD_SESSION,
       saveSession: (s) => written.push(s),
       clearSession: () => written.push('cleared'),
+      loadArchive: () => GOOD_ARCHIVE,
+      saveArchive: (list) => written.push(list),
       ...overrides,
     }
     return {
@@ -127,6 +218,15 @@ describe('存储 · 主进程那条路（IPC）', () => {
     expect(written).toEqual([GOOD_CONFIG, GOOD_SESSION, 'cleared'])
   })
 
+  it('周归档也走同一条路，读回来同样经过归一化', () => {
+    const { bridge, written } = bridgeWith()
+    const store = createIpcStore(bridge)
+    expect(store.loadArchive().map((e) => e.week)).toEqual(['2026-09-21', '2026-09-14'])
+
+    store.saveArchive(GOOD_ARCHIVE)
+    expect(written).toEqual([GOOD_ARCHIVE])
+  })
+
   it('文件坏了（读回来不是对象）时当没有，不往外抛', () => {
     const store = createIpcStore(bridgeWith({ loadConfig: () => '{半截', loadSession: () => 7 }).bridge)
     expect(store.loadConfig()).toBeNull()
@@ -138,12 +238,21 @@ describe('存储 · 主进程那条路（IPC）', () => {
       throw new Error('IPC 断了')
     }
     const store = createIpcStore(
-      bridgeWith({ loadConfig: boom, loadSession: boom, saveConfig: boom, clearSession: boom }).bridge,
+      bridgeWith({
+        loadConfig: boom,
+        loadSession: boom,
+        saveConfig: boom,
+        clearSession: boom,
+        loadArchive: boom,
+        saveArchive: boom,
+      }).bridge,
     )
     expect(store.loadConfig()).toBeNull()
     expect(store.loadSession()).toBeNull()
+    expect(store.loadArchive()).toEqual([])
     expect(() => store.saveConfig(GOOD_CONFIG)).not.toThrow()
     expect(() => store.clearSession()).not.toThrow()
+    expect(() => store.saveArchive(GOOD_ARCHIVE)).not.toThrow()
   })
 })
 
@@ -167,16 +276,20 @@ describe('存储 · 浏览器那条路（localStorage）', () => {
     const store = createLocalStore()
     store.saveConfig(GOOD_CONFIG)
     store.saveSession(GOOD_SESSION)
+    store.saveArchive(GOOD_ARCHIVE)
     expect(store.loadConfig()).toEqual(GOOD_CONFIG)
     expect(store.loadSession()).toMatchObject({ savedAt: 123 })
+    expect(store.loadArchive().map((e) => e.week)).toEqual(['2026-09-21', '2026-09-14'])
   })
 
   it('内容坏掉时当没有', () => {
     memory.set('ai-weekly:config', '{{{')
     memory.set('ai-weekly:last-session', 'null')
+    memory.set('ai-weekly:weeks', '{{{')
     const store = createLocalStore()
     expect(store.loadConfig()).toBeNull()
     expect(store.loadSession()).toBeNull()
+    expect(store.loadArchive()).toEqual([])
   })
 
   it('没有 localStorage（比如被禁用）时静默降级', () => {
@@ -184,8 +297,10 @@ describe('存储 · 浏览器那条路（localStorage）', () => {
     const store = createLocalStore()
     expect(store.loadConfig()).toBeNull()
     expect(store.loadSession()).toBeNull()
+    expect(store.loadArchive()).toEqual([])
     expect(() => store.saveConfig(GOOD_CONFIG)).not.toThrow()
     expect(() => store.clearSession()).not.toThrow()
+    expect(() => store.saveArchive(GOOD_ARCHIVE)).not.toThrow()
   })
 })
 
@@ -208,9 +323,12 @@ describe('存储 · 按环境挑通路', () => {
         loadSession: () => null,
         saveSession: () => {},
         clearSession: () => {},
+        loadArchive: () => GOOD_ARCHIVE,
+        saveArchive: () => {},
       },
     } satisfies AiWeeklyBridge
 
     expect(selectStore().loadConfig()).toMatchObject({ apiKey: 'sk-from-file' })
+    expect(selectStore().loadArchive()).toHaveLength(2)
   })
 })

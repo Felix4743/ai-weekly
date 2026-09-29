@@ -1,97 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resultToMarkdown } from '../core/resultText'
-import type { ListKey } from '../core/resultEdit'
 import {
   SECTION_KEYS,
   activeSection,
   buildOutline,
-  countSection,
   sectionDomId,
   targetScrollTop,
   type SectionKey,
 } from '../core/outline'
-import type { ChatMessage, PersonNote, WeeklyResult } from '../core/types'
-import { EditableList, EditablePeople } from './EditableList'
+import type { ChatMessage, WeeklyResult } from '../core/types'
+import { weekRangeText, type WeekKey } from '../core/week'
+import { ALL_COLLAPSED, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { ResultBody } from './ResultBody'
 
 interface Props {
   result: WeeklyResult
   messages: ChatMessage[]
   restored: boolean
   refining: boolean
+  /** 这份结果记在哪一周，显示在标题下面 —— 让人知道去总览里上哪儿找它 */
+  week: WeekKey
   onResultChange: (next: WeeklyResult) => void
   onRefine: (note: string) => void
   onRestart: () => void
   onBack: () => void
+  onOpenHistory: () => void
 }
-
-/** 可以折叠的四栏清单：收起时整块只剩两个字，点一下才展开 */
-type CollapsibleKey = 'events' | 'people' | 'things' | 'pending'
-
-const COLLAPSIBLE_KEYS: CollapsibleKey[] = ['events', 'people', 'things', 'pending']
 
 function isCollapsible(key: SectionKey): key is CollapsibleKey {
-  return (COLLAPSIBLE_KEYS as SectionKey[]).includes(key)
-}
-
-/** 默认全部收起：进来先看见目录、主线和下周计划，要看某一栏再点开 */
-const ALL_COLLAPSED: Record<CollapsibleKey, boolean> = {
-  events: true,
-  people: true,
-  things: true,
-  pending: true,
-}
-
-interface CollapsibleCardProps {
-  sectionKey: CollapsibleKey
-  title: string
-  desc: string
-  count: number
-  collapsed: boolean
-  onToggle: () => void
-  children: React.ReactNode
-}
-
-/**
- * 收起时整块只留标题那两个字 —— 想改的时候点一下展开，看完再点一下收起。
- * 标题本身就是要点的那个按钮，所以点哪儿都行。
- */
-function CollapsibleCard({
-  sectionKey,
-  title,
-  desc,
-  count,
-  collapsed,
-  onToggle,
-  children,
-}: CollapsibleCardProps) {
-  const domId = sectionDomId(sectionKey)
-
-  return (
-    <section className={`card list-card${collapsed ? ' collapsed' : ''}`} id={domId}>
-      <button
-        className="card-head"
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls={`${domId}-body`}
-        onClick={onToggle}
-      >
-        <span className="card-title" role="heading" aria-level={2}>
-          {title}
-        </span>
-        {count > 0 && <span className="card-count">{count}</span>}
-        <span className="card-toggle" aria-hidden="true">
-          {collapsed ? '展开' : '收起'}
-        </span>
-      </button>
-
-      {!collapsed && (
-        <div className="card-body" id={`${domId}-body`}>
-          <p className="card-desc">{desc}</p>
-          {children}
-        </div>
-      )}
-    </section>
-  )
+  return (['events', 'people', 'things', 'pending'] as SectionKey[]).includes(key)
 }
 
 export function ResultPage({
@@ -99,10 +36,12 @@ export function ResultPage({
   messages,
   restored,
   refining,
+  week,
   onResultChange,
   onRefine,
   onRestart,
   onBack,
+  onOpenHistory,
 }: Props) {
   const [copied, setCopied] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -125,7 +64,7 @@ export function ResultPage({
 
   const toggleCollapsed = useCallback((key: CollapsibleKey) => {
     setCollapsed((prev) => {
-      const next = { ...prev, [key]: !prev[key] }
+      const next = toggledCollapsed(prev, key)
       collapsedRef.current = next
       return next
     })
@@ -199,9 +138,6 @@ export function ResultPage({
     }
   }, [])
 
-  const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
-  const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
-
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(markdown)
@@ -235,10 +171,13 @@ export function ResultPage({
             {restored
               ? '这是上一次保存的结果'
               : `基于 ${messages.filter((m) => m.role === 'user').length} 次回答整理而成`}
-            <span className="edit-hint">· 内容都可以直接改</span>
+            <span className="edit-hint">· 记在 {weekRangeText(week)} · 内容都可以直接改</span>
           </p>
         </div>
         <div className="result-actions">
+          <button className="btn ghost" type="button" onClick={onOpenHistory}>
+            看总览
+          </button>
           <button className="btn primary" type="button" onClick={copy}>
             {copied ? '已复制 ✓' : '复制全文'}
           </button>
@@ -267,141 +206,40 @@ export function ResultPage({
         ))}
       </nav>
 
-      <CollapsibleCard
-        sectionKey="events"
-        title="事情"
-        desc="这周都忙了些什么"
-        count={countSection(result, 'events')}
-        collapsed={collapsed.events}
-        onToggle={() => toggleCollapsed('events')}
-      >
-        <EditableList
-          items={result.events}
-          onChange={setList('events')}
-          placeholder="这周做了什么…"
-          addLabel="添加一件事"
-          emptyText="（这次没有聊到具体的事）"
-        />
-      </CollapsibleCard>
-
-      <CollapsibleCard
-        sectionKey="people"
-        title="人际"
-        desc="这周和谁有关，卡在了哪里"
-        count={countSection(result, 'people')}
-        collapsed={collapsed.people}
-        onToggle={() => toggleCollapsed('people')}
-      >
-        <EditablePeople items={result.people} onChange={setPeople} />
-      </CollapsibleCard>
-
-      <CollapsibleCard
-        sectionKey="things"
-        title="物品"
-        desc="这周买了什么、处理掉了什么"
-        count={countSection(result, 'things')}
-        collapsed={collapsed.things}
-        onToggle={() => toggleCollapsed('things')}
-      >
-        <EditableList
-          items={result.things}
-          onChange={setList('things')}
-          placeholder="买了什么、卖掉了什么…"
-          addLabel="添加一样东西"
-          emptyText="（这周没有添置或处理东西）"
-        />
-      </CollapsibleCard>
-
-      <CollapsibleCard
-        sectionKey="pending"
-        title="未办"
-        desc="还没做完、一直拖着的事"
-        count={countSection(result, 'pending')}
-        collapsed={collapsed.pending}
-        onToggle={() => toggleCollapsed('pending')}
-      >
-        <EditableList
-          items={result.pending}
-          onChange={setList('pending')}
-          placeholder="还有什么没办完…"
-          addLabel="添加一条"
-          emptyText="（没有未办的事）"
-        />
-      </CollapsibleCard>
-
-      <section className="card highlight-card" id={sectionDomId('highlights')}>
-        <h2 className="card-title">本周主线</h2>
-        <p className="card-desc">
-          第一条是这一周的判断，后面几条只写清单里没有的东西 · 都可以直接改
-        </p>
-        <EditableList
-          items={result.highlights}
-          onChange={setList('highlights')}
-          placeholder="这周到底是怎么回事…"
-          addLabel="添加一条"
-          emptyText="（还没有主线）"
-          leadFirst
-        />
-      </section>
-
-      <section className="card plan-card" id={sectionDomId('plan')}>
-        <h2 className="card-title">
-          下周计划
-          <span className="badge-ai">AI 建议</span>
-        </h2>
-        <p className="card-desc">
-          下面是 AI 根据这周的情况给出的建议，你可以直接改。想到什么它没考虑到的，写在下面，让它重新整理一遍。
-        </p>
-
-        <div className="plan-grid">
-          <div>
-            <h3 className="col-title">三件重点</h3>
-            <EditableList
-              items={result.nextFocus}
-              onChange={setList('nextFocus')}
-              placeholder="下周的重点…"
-              addLabel="添加一条"
+      <ResultBody
+        result={result}
+        onResultChange={onResultChange}
+        collapsed={collapsed}
+        onToggle={toggleCollapsed}
+        planFooter={
+          <div className="refine-box">
+            <textarea
+              rows={2}
+              value={note}
+              disabled={refining}
+              placeholder="补充一句，比如：下周必须把报价发出去、得找赵总确认预算…"
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault()
+                  submitNote()
+                }
+              }}
             />
+            <div className="refine-actions">
+              <button
+                className="btn primary"
+                type="button"
+                disabled={!note.trim() || refining}
+                onClick={submitNote}
+              >
+                让 AI 重新整理
+              </button>
+              <span className="hint">清单内容不会被改动，只重写主线和下周计划</span>
+            </div>
           </div>
-          <div>
-            <h3 className="col-title">要跟进的人</h3>
-            <EditableList
-              items={result.nextFollowUps}
-              onChange={setList('nextFollowUps')}
-              placeholder="要联系谁…"
-              addLabel="添加一个人"
-              emptyText="（这次没有提到具体的人）"
-            />
-          </div>
-        </div>
-
-        <div className="refine-box">
-          <textarea
-            rows={2}
-            value={note}
-            disabled={refining}
-            placeholder="补充一句，比如：下周必须把报价发出去、得找赵总确认预算…"
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault()
-                submitNote()
-              }
-            }}
-          />
-          <div className="refine-actions">
-            <button
-              className="btn primary"
-              type="button"
-              disabled={!note.trim() || refining}
-              onClick={submitNote}
-            >
-              让 AI 重新整理
-            </button>
-            <span className="hint">清单内容不会被改动，只重写主线和下周计划</span>
-          </div>
-        </div>
-      </section>
+        }
+      />
 
       <div className="log-toggle">
         <button className="link-btn" type="button" onClick={() => setShowLog((v) => !v)}>

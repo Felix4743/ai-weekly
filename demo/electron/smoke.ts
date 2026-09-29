@@ -9,18 +9,20 @@ import { join } from 'node:path'
  * 而是「窗口起来了、页面是白的」，以及「桥在、但处理器不在」。
  * 这两类问题的症状都很隐蔽：应用看起来启动了，用起来才发现什么都干不了。
  *
- * 所以这里真跑三关：
+ * 所以这里真跑四关：
  *   一、窗口能起来、页面挂得上、预加载的桥在
  *   二、存储真的能落到主进程的 JSON 文件上（存一次、读一次、再验文件）
- *   三、一次真的走 IPC 的请求：打一个必定连不上的地址，
+ *   三、周归档那条通路也真的通（少一个 handler 就会是「总览永远是空的」）
+ *   四、一次真的走 IPC 的请求：打一个必定连不上的地址，
  *       要的是失败被翻译成人话，而不是抛异常、也不是卡在那儿
  *
- * 第三关刻意不依赖真实网络，因此可以稳定地跑。检查完把结论打在 stdout 上，
+ * 第四关刻意不依赖真实网络，因此可以稳定地跑。检查完把结论打在 stdout 上，
  * 退出码 0/1 —— scripts/smoke.mjs 据此判定。
  */
 
 const SMOKE_TIMEOUT_MS = 60_000
 const CONFIG_FILE = () => join(app.getPath('userData'), 'config.json')
+const ARCHIVE_FILE = () => join(app.getPath('userData'), 'weeks.json')
 
 interface BootProbe {
   hasBridge: boolean
@@ -30,6 +32,11 @@ interface BootProbe {
 }
 
 interface StoreProbe {
+  saved: boolean
+  readBack: string
+}
+
+interface ArchiveProbe {
   saved: boolean
   readBack: string
 }
@@ -91,6 +98,26 @@ export async function runSmokeCheck(win: BrowserWindow): Promise<void> {
       return finish(false, '配置文件里没有这次探针写进去的内容')
     }
 
+    /* ---------- 第二关之二：周归档那条通路也通 ---------- */
+    // 少注册一个 handler，症状是「总览页永远是空的」—— 启动时同样看不出来。
+
+    const archive = (await win.webContents.executeJavaScript(`(async () => {
+      const probe = [{ week: '2026-09-21', savedAt: 1, result: { highlights: ['smoke-probe-week'] } }]
+      window.aiWeekly.store.saveArchive(probe)
+      await new Promise((r) => setTimeout(r, 300))
+      const back = window.aiWeekly.store.loadArchive()
+      return {
+        saved: Array.isArray(back) && back.length === 1 && back[0].week === '2026-09-21',
+        readBack: JSON.stringify(back),
+      }
+    })()`)) as ArchiveProbe
+
+    if (!archive.saved) return finish(false, `周归档没能存下来又读回去：${archive.readBack}`)
+    if (!existsSync(ARCHIVE_FILE())) return finish(false, `周归档没有落到文件上：${ARCHIVE_FILE()}`)
+    if (!readFileSync(ARCHIVE_FILE(), 'utf8').includes('smoke-probe-week')) {
+      return finish(false, '周归档文件里没有这次探针写进去的内容')
+    }
+
     /* ---------- 第三关：一次真的走 IPC 的请求 ---------- */
     // 打一个必定连不上的地址。要验证的不是「能连上」，而是失败被翻译成
     // 一句用户看得懂的话，而且请求确实是从主进程发出去的。
@@ -112,7 +139,7 @@ export async function runSmokeCheck(win: BrowserWindow): Promise<void> {
 
     finish(
       true,
-      `窗口/页面/桥都正常，配置真的落到了文件，走 IPC 的请求失败也给了人话 —— ${boot.text.slice(0, 50)}`,
+      `窗口/页面/桥都正常，配置与周归档都真的落到了文件，走 IPC 的请求失败也给了人话 —— ${boot.text.slice(0, 50)}`,
     )
   } catch (err) {
     finish(false, err instanceof Error ? err.message : String(err))

@@ -25,6 +25,8 @@ function fullBridge(): AiWeeklyBridge {
       loadSession: () => null,
       saveSession: () => {},
       clearSession: () => {},
+      loadArchive: () => null,
+      saveArchive: () => {},
     },
   }
 }

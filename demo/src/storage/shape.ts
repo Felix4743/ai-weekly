@@ -6,6 +6,9 @@ import {
   type PersonaConfig,
   type WeeklyResult,
 } from '../core/types'
+import { ARCHIVE_LIMIT, sortEntries, type WeekEntry } from '../core/archive'
+import { isWeekKey, weekKeyOf, type WeekKey } from '../core/week'
+import { coerceResult } from '../core/parseResult'
 import { matchPersonaPreset } from '../core/persona'
 
 /**
@@ -20,15 +23,20 @@ export interface SavedSession {
   messages: ChatMessage[]
   result: WeeklyResult
   savedAt: number
+  /** 这份结果算在哪一周（那一周的周一）。旧存档没这一项，按 savedAt 推 */
+  week: WeekKey
 }
 
-/** 所有存储实现共同的接口：上层只认这五个操作 */
+/** 所有存储实现共同的接口：上层只认这七个操作 */
 export interface AppStore {
   loadConfig(): AppConfig | null
   saveConfig(config: AppConfig): void
   loadSession(): SavedSession | null
   saveSession(session: SavedSession): void
   clearSession(): void
+  /** 按周归档的结果，新的在前 */
+  loadArchive(): WeekEntry[]
+  saveArchive(list: WeekEntry[]): void
 }
 
 /**
@@ -68,9 +76,39 @@ export function normalizeSession(raw: unknown): SavedSession | null {
   if (!raw || typeof raw !== 'object') return null
   const parsed = raw as Partial<SavedSession>
   if (!Array.isArray(parsed.messages) || !parsed.result) return null
+  const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now()
   return {
     messages: parsed.messages,
     result: parsed.result,
-    savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+    savedAt,
+    // M7 之前存的会话没有 week：按保存时间推一个，总比算到本周头上强
+    week: isWeekKey(parsed.week) ? parsed.week : weekKeyOf(new Date(savedAt)),
   }
+}
+
+/**
+ * 周归档：坏掉的条目**逐条丢掉**，而不是整份丢掉。
+ *
+ * 和会话不一样 —— 会话是一份、坏一份等于没有；归档是一串，
+ * 里面有一周写坏了不该连累另外几十周。丢掉的条目会在下一次写入时自然消失。
+ */
+export function normalizeArchive(raw: unknown): WeekEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: WeekEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const parsed = item as Partial<WeekEntry>
+    if (!isWeekKey(parsed.week)) continue
+    const result = coerceResult(parsed.result)
+    if (!result) continue
+    out.push({
+      week: parsed.week,
+      savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+      result,
+    })
+  }
+  // 同一周出现两条时留最后一条（文件被手工编辑过才会这样）
+  const byWeek = new Map<WeekKey, WeekEntry>()
+  for (const item of out) byWeek.set(item.week, item)
+  return sortEntries([...byWeek.values()]).slice(0, ARCHIVE_LIMIT)
 }

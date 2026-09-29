@@ -1,6 +1,13 @@
+import type { WeekEntry } from '../core/archive'
 import type { AppConfig } from '../core/types'
 import type { AiWeeklyBridge } from '../shared/ipc'
-import { normalizeConfig, normalizeSession, type AppStore, type SavedSession } from './shape'
+import {
+  normalizeArchive,
+  normalizeConfig,
+  normalizeSession,
+  type AppStore,
+  type SavedSession,
+} from './shape'
 
 /**
  * Electron 里的存储：读写都交给主进程，落在两个 JSON 文件上。
@@ -51,6 +58,22 @@ export function createIpcStore(bridge: AiWeeklyBridge): AppStore {
     clearSession(): void {
       try {
         store.clearSession()
+      } catch {
+        /* 同上 */
+      }
+    },
+
+    loadArchive(): WeekEntry[] {
+      try {
+        return normalizeArchive(store.loadArchive())
+      } catch {
+        return []
+      }
+    },
+
+    saveArchive(list: WeekEntry[]): void {
+      try {
+        store.saveArchive(list)
       } catch {
         /* 同上 */
       }

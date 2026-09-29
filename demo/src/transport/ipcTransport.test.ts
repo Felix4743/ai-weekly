@@ -41,6 +41,8 @@ function fakeBridge(
         loadSession: () => null,
         saveSession: () => {},
         clearSession: () => {},
+        loadArchive: () => null,
+        saveArchive: () => {},
       },
     },
   }

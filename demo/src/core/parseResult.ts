@@ -52,6 +52,27 @@ function toPeople(value: unknown): PersonNote[] {
   return out
 }
 
+/**
+ * 把一份**已经是对象**的东西规整成结果结构；不是对象就返回 null。
+ *
+ * 和 `parseResult` 的区别只在入口：那个负责从模型的一整段文本里挖出 JSON，
+ * 这个负责「已经拿到对象了，但字段可能缺、可能是脏的」——
+ * 周归档从文件里读回来走的正是后者。
+ */
+export function coerceResult(raw: unknown): WeeklyResult | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  return {
+    events: toStringArray(o.events ?? o.事情),
+    people: toPeople(o.people ?? o.人际),
+    things: toStringArray(o.things ?? o.物品),
+    pending: toStringArray(o.pending ?? o.未办 ?? o.悬而未决 ?? o.pendingItems),
+    highlights: toStringArray(o.highlights ?? o.本周主线 ?? o.本周热点),
+    nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
+    nextFollowUps: toStringArray(o.nextFollowUps ?? o.下周跟进),
+  }
+}
+
 /** 把模型返回的任意文本规整成结果结构；无法解析时抛错 */
 export function parseResult(raw: string): WeeklyResult {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
@@ -66,20 +87,10 @@ export function parseResult(raw: string): WeeklyResult {
   } catch (err) {
     throw new Error(`模型返回的 JSON 无法解析：${(err as Error).message}`)
   }
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('模型返回的 JSON 不是对象')
-  }
 
-  const o = data as Record<string, unknown>
-  return {
-    events: toStringArray(o.events ?? o.事情),
-    people: toPeople(o.people ?? o.人际),
-    things: toStringArray(o.things ?? o.物品),
-    pending: toStringArray(o.pending ?? o.未办 ?? o.悬而未决 ?? o.pendingItems),
-    highlights: toStringArray(o.highlights ?? o.本周主线 ?? o.本周热点),
-    nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
-    nextFollowUps: toStringArray(o.nextFollowUps ?? o.下周跟进),
-  }
+  const result = coerceResult(data)
+  if (!result) throw new Error('模型返回的 JSON 不是对象')
+  return result
 }
 
 /**

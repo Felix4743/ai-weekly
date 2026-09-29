@@ -21,10 +21,12 @@ function render() {
       messages: [] as ChatMessage[],
       restored: false,
       refining: false,
+      week: '2026-09-21',
       onResultChange: () => {},
       onRefine: () => {},
       onRestart: () => {},
       onBack: () => {},
+      onOpenHistory: () => {},
     }),
   )
 }
@@ -56,5 +58,11 @@ describe('结果页渲染（临时校验）', () => {
     expect(html).toContain('老王')
     // 事情 1 条、物品 1 条这样的徽标
     expect(html).toContain('card-count')
+  })
+
+  it('写清了这份结果记在哪一周，并且有去总览的入口', () => {
+    const html = render()
+    expect(html).toContain('记在 9月21日 – 9月27日')
+    expect(html).toContain('看总览')
   })
 })

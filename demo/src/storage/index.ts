@@ -1,3 +1,4 @@
+import type { WeekEntry } from '../core/archive'
 import type { AppConfig } from '../core/types'
 import { getBridge } from '../shared/bridge'
 import { createIpcStore } from './ipcStore'
@@ -36,4 +37,12 @@ export function saveSession(session: SavedSession): void {
 
 export function clearSession(): void {
   selectStore().clearSession()
+}
+
+export function loadArchive(): WeekEntry[] {
+  return selectStore().loadArchive()
+}
+
+export function saveArchive(list: WeekEntry[]): void {
+  selectStore().saveArchive(list)
 }
