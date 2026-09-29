@@ -16,6 +16,7 @@
     "dist": "npm run build && npm run build:electron && electron-builder --win",
     "smoke": "npm run build && npm run build:electron && node scripts/smoke.mjs",
     "smoke:packaged": "node scripts/smoke.mjs --packaged",
+    "try:model": "vitest run --config vitest.live.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

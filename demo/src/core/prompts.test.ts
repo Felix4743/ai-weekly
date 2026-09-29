@@ -105,6 +105,14 @@ describe('提示词 · 区块开场与收尾', () => {
       '生成',
     )
   })
+
+  // 真模型上踩到过：收尾时模型顺手把下一块的问题也问了，用户切过去又被正式问一遍。
+  it('收尾时只许提下一块的名称，不许替它把问题先问了', () => {
+    const state = withBlock('event', { askIndex: 4, followUpCount: 0, complete: true })
+    const text = textOf(buildClosingPrompt(state, 'event', PERSONA))
+    expect(text).toContain('不要替那一块把问题先问了')
+    expect(text).toContain('不要替下一块提问')
+  })
 })
 
 describe('提示词 · 一轮追问判断', () => {
@@ -164,6 +172,16 @@ describe('提示词 · 一轮追问判断', () => {
     const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
     expect(text).toContain('已经问完')
     expect(text).toContain('人际')
+  })
+
+  it('问完的那一轮也不许替下一块把问题先问了', () => {
+    const state = withBlock('event', {
+      askIndex: SCRIPT[0].mainQuestions.length - 1,
+      followUpCount: 0,
+      complete: false,
+    })
+    const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
+    expect(text).toContain('不要替那一块把问题先问了')
   })
 
   it('主问题聊完之后转成自由聊：不再念题目，也不催他换块', () => {

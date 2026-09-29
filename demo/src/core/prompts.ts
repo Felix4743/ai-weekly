@@ -98,7 +98,8 @@ export function buildClosingPrompt(
   const tail =
     remaining.length === 0
       ? '四块都聊过了，告诉他可以生成这周的梳理了。'
-      : `还有这些块没聊：${remaining.map((d) => d.label).join('、')}。自然地提一下可以接着聊。`
+      : `还有这些块没聊：${remaining.map((d) => d.label).join('、')}。自然地提一下可以接着聊，` +
+        '但**只提块的名称，不要替那一块把问题先问了** —— 他切过去之后会正式问一遍，先问就是重复。'
 
   return [
     { role: 'system', content: buildInterviewerSystem(persona, { marker: false }) },
@@ -108,7 +109,7 @@ export function buildClosingPrompt(
         `「${script.label}」这一块的问题已经问完了。`,
         tail,
         '',
-        '要求：一句话，不超过 45 字，不要总结刚才聊过的内容，不要煽情。' +
+        '要求：一句话，不超过 45 字，不要总结刚才聊过的内容，不要煽情，不要替下一块提问。' +
           '注意别把话筒收走 —— 对方想继续说，随时可以接着说。',
       ].join('\n'),
     },
@@ -172,7 +173,8 @@ export function buildTurnPrompt(
 
   const advanceInstruction = blockWillFinish
     ? otherBlocks.length > 0
-      ? `本区块的主问题已经问完。用一句自然的收尾，并提一下可以接着聊「${otherBlocks[0].label}」。`
+      ? `本区块的主问题已经问完。用一句自然的收尾，并提一下可以接着聊「${otherBlocks[0].label}」，` +
+        '但**只提块的名称，不要替那一块把问题先问了** —— 他切过去之后会正式问一遍，先问就是重复。'
       : '四块都聊过了。用一句自然的收尾，告诉他可以生成这周的梳理了。'
     : `自然地过渡到下一个主问题：「${nextQuestion}」。可以顺着刚才的话带过去，不要生硬地念题目。`
 
