@@ -902,6 +902,63 @@ body {
   color: var(--ink-3);
 }
 
+/* ---------- 可折叠的四栏清单 ---------- */
+/* 收起时整块只剩标题那两个字，点一下才展开；标题本身就是那个按钮 */
+
+.list-card {
+  padding: 14px 20px;
+}
+
+.list-card.collapsed {
+  padding: 10px 20px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.card-head .card-title {
+  margin: 0;
+  transition: color 0.15s;
+}
+
+.card-head:hover .card-title {
+  color: var(--accent-ink);
+}
+
+.card-count {
+  font-size: 12px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.card-toggle {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.card-head:hover .card-toggle {
+  color: var(--accent);
+}
+
+.card-body .card-desc {
+  margin-top: 10px;
+}
+
 .highlight-card {
   background: linear-gradient(180deg, #f4faf9 0%, #ffffff 60%);
   border-color: #dceceb;
@@ -955,7 +1012,7 @@ body {
   background: #fbfaf8;
 }
 
-/* 本周热点的第一条是「这一周的主线」：让它看起来像一句判断，而不是又一条清单 */
+/* 本周主线的第一条是「这一周的主线」：让它看起来像一句判断，而不是又一条清单 */
 .edit-row.lead,
 .edit-row.lead:hover {
   background: var(--accent-soft);

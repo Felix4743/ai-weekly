@@ -259,7 +259,7 @@ describe('演示用假 AI · 用户补充后重新整理', () => {
     expect(next.people.map((p) => p.name)).toContain('手工加的人')
   })
 
-  it('把补充内容分别识别成人、物品和悬着的事', async () => {
+  it('把补充内容分别识别成人、物品和未办的事', async () => {
     const initial = await ai.summarize(FULL_HISTORY)
     const next = await ai.refine(
       FULL_HISTORY,

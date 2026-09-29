@@ -16,8 +16,8 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   events: '事情',
   people: '人际',
   things: '物品',
-  pending: '悬着',
-  highlights: '本周热点',
+  pending: '未办',
+  highlights: '本周主线',
   plan: '下周计划',
 }
 

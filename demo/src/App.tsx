@@ -231,7 +231,7 @@ export default function App() {
       const current = resultRef.current
       if (!current || busyRef.current) return
       busyRef.current = true
-      setOverlay({ title: '正在重新整理…', sub: '结合你的补充，重写热点和下周计划' })
+      setOverlay({ title: '正在重新整理…', sub: '结合你的补充，重写主线和下周计划' })
       try {
         commitResult(await ai.refine(messagesRef.current, current, note))
         setError(null)

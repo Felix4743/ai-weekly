@@ -96,6 +96,18 @@ export default defineConfig({
   // 症状就是「窗口起来了、页面全白」—— 冒烟测试第一次跑就抓到了这个。
   // 改成相对路径后，dev server 与 Electron 两种加载方式都成立。
   base: './',
+  build: {
+    /**
+     * 必须显式写这个开关。
+     *
+     * 默认那份「outDir 在 root 里就清空」的判断，在相对 outDir（'dist'）下没有生效：
+     * 实测连着构建多次，dist/assets 里堆了二十来份历史产物，而 electron-builder
+     * 是按 dist/** 全量打包的 —— 每一版安装包里都塞着一堆死文件；更麻烦的是
+     * 「在 asar 里按字符串查新代码在不在」这种验证，会被旧包里的同名文案骗过（已经骗过一次）。
+     * 命令行加 --emptyOutDir 也没用，只有写进配置才真的清。
+     */
+    emptyOutDir: true,
+  },
   plugins: [react(), llmProxy()],
   server: {
     host: '127.0.0.1',

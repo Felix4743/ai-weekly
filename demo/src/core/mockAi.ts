@@ -168,7 +168,7 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
   }
 }
 
-/** 本周热点：从当前清单里挑出最值得记住的几条 */
+/** 本周主线：从当前清单里挑出最值得记住的几条 */
 function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]>): string[] {
   const pool = [...result.events, ...result.pending, ...byDim.mood]
   const highlights: string[] = []
@@ -176,7 +176,7 @@ function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]
   if (result.events[0]) highlights.push(`${result.events[0]} —— 这是这周精力主要落的地方`)
   const win = pool.find((t) => WIN_RE.test(t))
   if (win) highlights.push(`${firstSentence(win, 36)}，值得记一笔`)
-  if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还悬着，下周需要一个交代`)
+  if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还没办完，下周需要一个交代`)
   if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
   if (result.things[0]) highlights.push(`${firstSentence(result.things[0], 32)} —— 这周和「东西」有关的一笔`)
   if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)

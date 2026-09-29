@@ -30,7 +30,7 @@ export function resultToMarkdown(r: WeeklyResult): string {
   }
   lines.push('')
 
-  lines.push('**悬着**')
+  lines.push('**未办**')
   bulletList(lines, r.pending)
   lines.push('')
 
@@ -38,7 +38,7 @@ export function resultToMarkdown(r: WeeklyResult): string {
   bulletList(lines, r.things)
   lines.push('')
 
-  lines.push('## 本周热点', '')
+  lines.push('## 本周主线', '')
   if (r.highlights.length === 0) {
     lines.push('- （无）')
   } else {
