@@ -1,0 +1,45 @@
+# electron-builder 打包配置（M4）
+#
+# 只装构建产物，不装 node_modules：渲染层被 vite 打成了 dist/，
+# 主进程与预加载被 esbuild 打成了 dist-electron/，运行时不再需要任何依赖包。
+
+appId: com.aiweekly.desktop
+productName: AI周报
+copyright: Copyright © 2026 AI 周报
+
+directories:
+  output: release
+  buildResources: build
+
+# 产物里只放这三样，包体积因此只有 Electron 本身那么大
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+# 没有任何原生模块，跳过 rebuild，打包快很多
+npmRebuild: false
+
+# 直接用 node_modules 里已经装好的那份 Electron（复制过去），不走默认的
+# 「下载 zip → 解压到 win-unpacked.tmp → 改名为 win-unpacked」。
+# 本机上那一步稳定失败：刚解压出来的 electron.exe 还被句柄占着，改名报 EPERM。
+# 换机器后这行也可以留着 —— 少一次 150MB 的解压，本来就更划算。
+electronDist: node_modules/electron/dist
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # 图标：build/icon.png（256×256，由 scripts/make-icon.mjs 生成，无第三方图形依赖）。
+  # 明确写出来，免得它去找不存在的 build/icon.ico 然后悄悄退回 Electron 默认图标。
+  icon: build/icon.png
+  artifactName: ai-weekly-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI周报
