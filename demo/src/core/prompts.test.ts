@@ -252,6 +252,21 @@ describe('提示词 · 生成与重新整理', () => {
     expect(text).toContain('不要编造')
   })
 
+  // 真模型实测：热点原来是清单的复印件，换个说法把 events/people 又列了一遍。
+  it('热点的规矩写清楚了：第一条是主线，后面只写清单里没有的东西', () => {
+    const text = textOf(buildSummarizePrompt([msg('user', '在改方案', 'event')]))
+    expect(text).toContain('这一周的主线')
+    expect(text).toContain('清单里看不到的东西')
+  })
+
+  it('重新整理走的是同一套热点规矩，不能只在生成时成立', () => {
+    const text = textOf(
+      buildRefinePrompt([msg('user', '在改方案', 'event')], createEmptyResult(), '补充一句'),
+    )
+    expect(text).toContain('这一周的主线')
+    expect(text).toContain('清单里看不到的东西')
+  })
+
   it('一次都没说时如实留空，不让模型瞎编', () => {
     expect(textOf(buildSummarizePrompt([]))).toContain('什么都没说')
   })

@@ -955,6 +955,16 @@ body {
   background: #fbfaf8;
 }
 
+/* 本周热点的第一条是「这一周的主线」：让它看起来像一句判断，而不是又一条清单 */
+.edit-row.lead,
+.edit-row.lead:hover {
+  background: var(--accent-soft);
+}
+
+.edit-row.lead .edit-text {
+  font-weight: 600;
+}
+
 .edit-text {
   flex: 1;
   position: relative;

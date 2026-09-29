@@ -42,6 +42,24 @@ describe('结果导出为 Markdown', () => {
     expect(md).toContain('- 老王 — 方案卡在他那儿没拍板')
   })
 
+  it('热点第一条标成「主线」，其余仍是一条条列出来', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      highlights: ['这周基本被客户方案拖着', '改了三版还没定', '跟产品吵了一架'],
+    })
+    expect(md).toContain('**主线**：这周基本被客户方案拖着')
+    expect(md).toContain('- 改了三版还没定')
+    expect(md).toContain('- 跟产品吵了一架')
+    // 主线不该又被当成普通条目列一遍
+    expect(md).not.toContain('- 这周基本被客户方案拖着')
+  })
+
+  it('只有一条热点时就是主线本身，不出现悬空的列表', () => {
+    const md = resultToMarkdown({ ...FULL, highlights: ['这周只有一件事'] })
+    expect(md).toContain('**主线**：这周只有一件事')
+    expect(md).not.toContain('- 这周只有一件事')
+  })
+
   it('没有备注的人名只渲染名字', () => {
     const md = resultToMarkdown({ ...FULL, people: [{ name: '小李', note: '' }] })
     expect(md).toContain('- 小李')

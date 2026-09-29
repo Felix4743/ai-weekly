@@ -215,13 +215,16 @@ export function ResultPage({
 
       <section className="card highlight-card" id={sectionDomId('highlights')}>
         <h2 className="card-title">本周热点</h2>
-        <p className="card-desc">这一周真正值得记住的几件事</p>
+        <p className="card-desc">
+          第一条是这周的主线，后面几条是支撑它的事 · 都可以直接改
+        </p>
         <EditableList
           items={result.highlights}
           onChange={setList('highlights')}
           placeholder="想记住什么…"
           addLabel="添加一条"
           emptyText="（还没有热点）"
+          leadFirst
         />
       </section>
 

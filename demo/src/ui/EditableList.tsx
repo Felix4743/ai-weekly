@@ -9,6 +9,8 @@ interface EditableListProps {
   placeholder?: string
   addLabel?: string
   emptyText?: string
+  /** 第一条是「主线」：界面上给它一点分量，别看起来跟别的条目一样 */
+  leadFirst?: boolean
 }
 
 export function EditableList({
@@ -17,6 +19,7 @@ export function EditableList({
   placeholder = '写一条…',
   addLabel = '添加一条',
   emptyText = '（这次没有聊到）',
+  leadFirst = false,
 }: EditableListProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
@@ -70,7 +73,7 @@ export function EditableList({
 
       <ul className="edit-list">
         {items.map((item, i) => (
-          <li key={`${i}-${item}`} className="edit-row">
+          <li key={`${i}-${item}`} className={`edit-row${leadFirst && i === 0 ? ' lead' : ''}`}>
             {editing === i ? (
               <input
                 className="edit-input"

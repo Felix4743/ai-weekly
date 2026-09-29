@@ -39,7 +39,17 @@ export function resultToMarkdown(r: WeeklyResult): string {
   lines.push('')
 
   lines.push('## 本周热点', '')
-  bulletList(lines, r.highlights)
+  if (r.highlights.length === 0) {
+    lines.push('- （无）')
+  } else {
+    // 第一条是这一周的主线。导出出去的东西也要让人一眼看出
+    // 哪一句是判断、哪几条是支撑，否则粘到别处就退化成一串并列条目
+    lines.push(`**主线**：${r.highlights[0]}`)
+    if (r.highlights.length > 1) {
+      lines.push('')
+      bulletList(lines, r.highlights.slice(1))
+    }
+  }
   lines.push('')
 
   lines.push('## 下周计划', '')
