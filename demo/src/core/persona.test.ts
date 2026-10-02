@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildInterviewerSystem,
   defaultPersonaPrompt,
   isPersonaPresetId,
   matchPersonaPreset,
@@ -71,5 +72,68 @@ describe('专属采访者 · 认得出这是哪一套', () => {
     expect(isPersonaPresetId('custom')).toBe(true)
     expect(isPersonaPresetId('gpt-5')).toBe(false)
     expect(isPersonaPresetId(undefined)).toBe(false)
+  })
+})
+
+describe('专属采访者 · 改不掉的约定', () => {
+  const withMarker = () => buildInterviewerSystem('你是一个测试人设。', { marker: true })
+  const withoutMarker = () => buildInterviewerSystem('你是一个测试人设。', { marker: false })
+
+  it('要标记的那几轮，三个标记和各自的意思都交代了', () => {
+    const text = withMarker()
+    expect(text).toContain('第一行必须')
+    expect(text).toContain('[追问]')
+    expect(text).toContain('[换题]')
+    expect(text).toContain('[换块]')
+    expect(text).toContain('第二行开始才是你要说的话')
+  })
+
+  it('不需要表态的那几轮，就不提标记这回事', () => {
+    const text = withoutMarker()
+    expect(text).not.toContain('[追问]')
+    expect(text).not.toContain('[换块]')
+    expect(text).not.toContain('第一行必须')
+  })
+
+  it('一次别把问题堆成长串，也不要 markdown 和 JSON', () => {
+    const text = withoutMarker()
+    expect(text).toContain('只输出你要说的那一句话')
+    expect(text).toContain('可以问一到三个小问题')
+    expect(text).toContain('不要堆成一长串')
+    expect(text).toContain('不要列清单')
+    expect(text).toContain('不要 markdown')
+  })
+
+  it('一个话题要问到复盘的效果为止，但不能原地打转', () => {
+    const text = withoutMarker()
+    expect(text).toContain('问到复盘的效果为止')
+    expect(text).toContain('别在一个话题上原地打转')
+  })
+
+  it('采访阶段保持中立：不说教、不贴标签、不编造', () => {
+    const text = withoutMarker()
+    expect(text).toContain('不说教、不替对方下结论、不贴标签')
+    expect(text).toContain('不要编造对方没说过的事')
+  })
+
+  it('整段话有长度上限', () => {
+    expect(withoutMarker()).toContain('不超过 160 字')
+  })
+
+  it('约定一共四条并按序号排好，标记规则接在最后当第五条', () => {
+    const plain = withoutMarker()
+    expect(plain).toContain('1. ')
+    expect(plain).toContain('4. ')
+    expect(plain).not.toContain('5. ')
+
+    const marked = withMarker()
+    expect(marked).toContain('5. ')
+    expect(marked.indexOf('5. ')).toBeGreaterThan(marked.indexOf('4. '))
+  })
+
+  it('约定排在整段 system 的最后，人设盖不住它', () => {
+    const persona = '我是一个人设。'
+    const text = buildInterviewerSystem(persona, { marker: false })
+    expect(text.indexOf('必须遵守')).toBeGreaterThan(text.indexOf(persona))
   })
 })
