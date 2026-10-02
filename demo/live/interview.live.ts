@@ -5,7 +5,7 @@ import { describeError } from '../src/core/aiError'
 import type { ChatTransport } from '../src/core/chatTransport'
 import { createInterview, isBlockComplete, nextStep, openBlock, setDepth } from '../src/core/interview'
 import { createOpenAiClient } from '../src/core/openAiClient'
-import { SCRIPT, TOTAL_MAIN_QUESTIONS } from '../src/core/script'
+import { followUpCap, SCRIPT, TOTAL_MAIN_QUESTIONS } from '../src/core/script'
 import {
   nextId,
   type AppConfig,
@@ -111,7 +111,19 @@ const ANSWERS: Record<Dimension, string[]> = {
   ],
 }
 
-const MAX_ANSWERS_PER_BLOCK = 12
+/**
+ * 试跑台固定用中度档：真实使用时这一步是用户点按钮挑的，这里固定住，
+ * 追问上限和整场耗时才好横向比较。
+ */
+const LIVE_DEPTH = 'mid' as const
+
+/**
+ * 一个区块最多要回答多少轮：每道主问题都一路追到上限，再加上收尾那几轮。
+ * 0.9.1 里最长的内容块（事情）有 6 道主问题，中度档每题最多 1 + 2 轮，
+ * 所以按 SCRIPT 自己算出来，以后加题不用回来改这个数。
+ */
+const MAX_ANSWERS_PER_BLOCK =
+  Math.max(...SCRIPT.map((b) => b.mainQuestions.length)) * (1 + followUpCap(LIVE_DEPTH)) + 2
 
 type Marker = '追问' | '换题' | '换块' | '无标记'
 
@@ -258,9 +270,9 @@ describe('真模型试跑台', () => {
 
       try {
         for (const block of SCRIPT) {
-          // 0.9.1 的流程是「状态 → 定深度 → 上周对账 → 事情 → 人际 → 物与钱」。
-          // 真实使用时定档是用户点按钮挑的，试跑台固定用中度档，好让追问上限稳定。
-          if (block.key !== 'mood') state = setDepth(state, 'mid')
+          // 0.9.1 的流程是「状态 → 定深度 → 上周对账 → 事情 → 人际 → 物与钱」，
+          // 状态块聊完才定档，定档之后才进对账和内容块。
+          if (block.key !== 'mood') state = setDepth(state, LIVE_DEPTH)
           state = openBlock(state, block.key)
           const dim = block.key
           const openingFrom = calls.length
@@ -271,7 +283,8 @@ describe('真模型试跑台', () => {
           let answered = 0
           while (!isBlockComplete(state, dim) && answered < MAX_ANSWERS_PER_BLOCK) {
             const bank = ANSWERS[dim]
-            // 用完了才绕回去；8 条够一整块聊完，正常情况下不会重样
+            // 用完了才绕回去。8 条一般够一整块聊完，但中度档下模型要是每题都追满，
+            // 最长的块会绕回开头重样 —— 试跑台只求把流程真的走完，重样不影响判定。
             const answer = bank[answered % bank.length]
             turns.push({ dim, who: 'me', text: answer })
             say('me', answer, dim)
