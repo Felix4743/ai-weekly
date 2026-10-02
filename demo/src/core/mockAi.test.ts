@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createMockAi,
+  decideAction,
   extractName,
   groupAnswers,
   isNonAnswer,
@@ -15,9 +16,10 @@ import {
   finishAll,
   nextStep,
   openBlock,
+  setDepth,
 } from './interview'
-import { MAX_FOLLOWUPS_PER_QUESTION } from './script'
-import type { BlockProgress, ChatMessage, Dimension, InterviewState } from './types'
+import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, followUpCap } from './script'
+import type { BlockProgress, ChatMessage, Depth, Dimension, InterviewState } from './types'
 
 const ai = createMockAi({ instant: true })
 
@@ -27,35 +29,41 @@ function msg(role: 'ai' | 'user', text: string, dimension: Dimension): ChatMessa
   return { id: `m${seq}`, role, text, dimension, at: seq }
 }
 
-/** 只覆盖想改的那几项，其余进度沿用初始值 */
-function withBlocks(patch: Partial<Record<Dimension, Partial<BlockProgress>>>): InterviewState {
+/** 只覆盖想改的那几项，其余进度沿用初始值；档位默认「还没定」 */
+function withBlocks(
+  patch: Partial<Record<Dimension, Partial<BlockProgress>>>,
+  depth: Depth | null = null,
+): InterviewState {
   const blocks = { ...createInterview().blocks }
   for (const [dim, part] of Object.entries(patch)) {
     const key = dim as Dimension
     if (part) blocks[key] = { ...blocks[key], ...part }
   }
-  return { active: null, blocks }
+  return { active: null, blocks, depth }
 }
 
 const FULL_HISTORY: ChatMessage[] = [
-  msg('ai', '周末好。这周主要忙了些什么？', 'event'),
+  msg('ai', '周末好。先从状态开始 —— 这周睡眠、运动和吃饭怎么样？', 'mood'),
+  msg('user', '挺累的，主要就是方案反复改这件事拖着。', 'mood'),
+  msg('ai', '好，说说这周都忙了什么。', 'event'),
   msg('user', '在改客户那个方案，改了三版了还没定下来。', 'event'),
   msg('user', '本来想把季度数据整理一下，一直没腾出时间。', 'event'),
-  msg('ai', '好，说说人。这周跟谁打交道最多？', 'people'),
+  msg('ai', '再说说人。这周跟谁打交道最多？', 'people'),
   msg('user', '主要是跟老王对接方案，还有跟小李吃了顿饭。', 'people'),
   msg('user', '想约张总聊聊明年的方向，但一直没敢开口。', 'people'),
-  msg('ai', '再说说东西 —— 这周买了什么、或者添置了什么东西？', 'thing'),
+  msg('ai', '最后说说东西和钱 —— 这周买了什么、或者添置了什么东西？', 'thing'),
   msg('user', '买了个新键盘，之前那个手感不行，纠结了半个月终于下单了。', 'thing'),
   msg('user', '没有，这周没顾上这些。', 'thing'),
-  msg('ai', '换个角度。这周整体感觉怎么样，累不累？', 'mood'),
-  msg('user', '挺累的，主要就是方案反复改这件事拖着。', 'mood'),
+  msg('ai', '对一下上周说好的，实际落到了哪儿？', 'reconcile'),
+  msg('user', '上周说好的报价发出去了，只发了初稿；要跟进的张总一直没约上。', 'reconcile'),
 ]
 
 describe('演示用假 AI · 对话', () => {
   it('区块第一次被打开时，给出开场语和第一个问题', async () => {
-    const text = await ai.nextMessage(createInterview(), 'event', [])
+    const s = createInterview()
+    const text = await ai.nextMessage(s, 'mood', [])
     expect(text).toContain('周末好')
-    expect(text).toContain('这周主要忙了些什么')
+    expect(text).toContain(currentQuestion(s, 'mood'))
   })
 
   it('不是首次进入时，只问问题，不加开场语', async () => {
@@ -69,6 +77,13 @@ describe('演示用假 AI · 对话', () => {
     expect(await ai.nextMessage(s, 'event', FULL_HISTORY)).toBe(currentFollowUp(s, 'event'))
   })
 
+  it('状态块聊完、还没定档时，提示用户挑复盘深度', async () => {
+    const s = withBlocks({ mood: { complete: true } })
+    const text = await ai.nextMessage(s, 'mood', FULL_HISTORY)
+    expect(text).toContain('深度复盘')
+    expect(text).toContain('快速复盘')
+  })
+
   it('区块聊完后给出收尾语，并提示下一块', async () => {
     const s = withBlocks({
       event: { askIndex: 2, followUpCount: 0, complete: true },
@@ -76,12 +91,13 @@ describe('演示用假 AI · 对话', () => {
       thing: { askIndex: 2, followUpCount: 0, complete: true },
     })
     const text = await ai.nextMessage(s, 'thing', FULL_HISTORY)
-    expect(text).toContain('物品')
+    expect(text).toContain('物与钱')
     expect(text).toContain('状态')
   })
 
-  it('四块都聊完后提示可以生成梳理', async () => {
-    const text = await ai.nextMessage(finishAll(createInterview()), 'mood', FULL_HISTORY)
+  it('五块都聊完后提示可以生成梳理', async () => {
+    const s = setDepth(finishAll(createInterview({ hasLastWeek: false })), 'mid')
+    const text = await ai.nextMessage(s, 'mood', FULL_HISTORY)
     expect(text).toContain('生成')
   })
 
@@ -103,17 +119,66 @@ describe('演示用假 AI · 对话', () => {
     expect(shouldFollowUp('   ', s, 'event')).toBe(false)
   })
 
-  it('到达追问上限后不再追问', () => {
+  it('还没定档时用默认上限，到顶就不再追问', () => {
+    expect(followUpCap(null)).toBe(DEFAULT_FOLLOWUP_CAP)
     const s = withBlocks({
-      thing: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
+      thing: { askIndex: 0, followUpCount: DEFAULT_FOLLOWUP_CAP, complete: false },
     })
     expect(shouldFollowUp('短', s, 'thing')).toBe(false)
+  })
+
+  it('快速档只允许追一次，到顶就不再追问', () => {
+    const s = withBlocks(
+      { thing: { askIndex: 0, followUpCount: FOLLOWUP_CAPS.fast, complete: false } },
+      'fast',
+    )
+    expect(shouldFollowUp('短', s, 'thing')).toBe(false)
+  })
+
+  it('深度档可以一直追到 5 次，第 5 次之后才停', () => {
+    const almost = withBlocks(
+      { thing: { askIndex: 0, followUpCount: FOLLOWUP_CAPS.deep - 1, complete: false } },
+      'deep',
+    )
+    expect(shouldFollowUp('短', almost, 'thing')).toBe(true)
+
+    const atCap = withBlocks(
+      { thing: { askIndex: 0, followUpCount: FOLLOWUP_CAPS.deep, complete: false } },
+      'deep',
+    )
+    expect(shouldFollowUp('短', atCap, 'thing')).toBe(false)
   })
 
   it('主问题聊完之后接着说，就不再催他换块了', async () => {
     const s = withBlocks({ event: { complete: true, freeTurns: 1 } })
     const text = await ai.nextMessage(s, 'event', FULL_HISTORY)
     expect(text).toContain('还有呢')
+  })
+})
+
+describe('演示用假 AI · 行首动作判定', () => {
+  it('没聊完、回答太短：接着追', () => {
+    expect(decideAction('改方案', createInterview(), 'event')).toBe('followup')
+  })
+
+  it('没聊完、回答已经够完整：换下一题', () => {
+    expect(
+      decideAction(
+        '这周主要是在改客户那个方案，来回改了三版，中间还开了很多会，最后终于定下来了。',
+        createInterview(),
+        'event',
+      ),
+    ).toBe('next')
+  })
+
+  it('自由聊里他说「说完了」：换块', () => {
+    const s = withBlocks({ event: { complete: true, freeTurns: 2 } })
+    expect(decideAction('差不多了，就说完了。', s, 'event')).toBe('block')
+  })
+
+  it('自由聊里他还想接着说：继续追', () => {
+    const s = withBlocks({ event: { complete: true, freeTurns: 2 } })
+    expect(decideAction('还有件事，周五那个评审会也挺折腾的。', s, 'event')).toBe('followup')
   })
 })
 
@@ -128,18 +193,18 @@ describe('演示用假 AI · 一轮回复', () => {
     ),
   ]
 
-  it('reply 一次就同时给出「要不要追问」和下一句话', async () => {
+  it('reply 一次就同时给出「接下来怎么走」和下一句话', async () => {
     const s = openBlock(createInterview(), 'event')
     const turn = await ai.reply(s, 'event', shortAnswer)
-    expect(turn.wantsFollowUp).toBe(true)
+    expect(turn.action).toBe('followup')
     expect(turn.message.length).toBeGreaterThan(0)
   })
 
   it('不需要追问时，reply 的话术正好是状态机推进后的下一题', async () => {
     const s = openBlock(createInterview(), 'event')
     const turn = await ai.reply(s, 'event', longAnswer)
-    expect(turn.wantsFollowUp).toBe(false)
-    expect(turn.message).toBe(currentQuestion(nextStep(s, 'event', false), 'event'))
+    expect(turn.action).toBe('next')
+    expect(turn.message).toBe(currentQuestion(nextStep(s, 'event', 'next'), 'event'))
   })
 
   it('reply 会通过 onDelta 把内容吐出去，拼起来等于完整回复', async () => {
@@ -161,10 +226,18 @@ describe('演示用假 AI · 一轮回复', () => {
 
   it('追问次数到顶时，reply 不再追问', async () => {
     const s = withBlocks({
-      event: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
+      event: { askIndex: 0, followUpCount: DEFAULT_FOLLOWUP_CAP, complete: false },
     })
     const turn = await ai.reply(s, 'event', shortAnswer)
-    expect(turn.wantsFollowUp).toBe(false)
+    expect(turn.action).toBe('next')
+  })
+})
+
+describe('演示用假 AI · 推进状态机', () => {
+  it('模型说「这块聊够了」时，nextStep 立刻把这一块标成已完成', () => {
+    const s = withBlocks({ event: { askIndex: 1, followUpCount: 2, complete: false } })
+    const advanced = nextStep(s, 'event', 'block')
+    expect(advanced.blocks.event.complete).toBe(true)
   })
 })
 
@@ -187,19 +260,22 @@ describe('演示用假 AI · 人名与归类', () => {
     expect(isNonAnswer('想换个键盘')).toBe(false)
   })
 
-  it('按区块归类用户回答，物品单独一块', () => {
+  it('按区块归类用户回答，五个区块各归各的', () => {
     const grouped = groupAnswers(FULL_HISTORY)
     expect(grouped.event).toHaveLength(2)
     expect(grouped.people).toHaveLength(2)
     expect(grouped.thing).toHaveLength(2)
     expect(grouped.mood).toHaveLength(1)
+    expect(grouped.reconcile).toHaveLength(1)
   })
 
-  it('示例回答覆盖全部四个区块', () => {
-    for (const dim of ['event', 'people', 'thing', 'mood'] as Dimension[]) {
+  it('示例回答覆盖全部五个维度，并且按下标循环取值', () => {
+    for (const dim of ['mood', 'reconcile', 'event', 'people', 'thing'] as Dimension[]) {
       expect(sampleAnswer(dim, 0).length).toBeGreaterThan(0)
+      expect(sampleAnswer(dim, 1).length).toBeGreaterThan(0)
     }
-    expect(sampleAnswer('event', 4)).toBe(sampleAnswer('event', 0))
+    expect(sampleAnswer('event', 6)).toBe(sampleAnswer('event', 0))
+    expect(sampleAnswer('mood', 4)).toBe(sampleAnswer('mood', 0))
   })
 })
 
@@ -215,6 +291,36 @@ describe('演示用假 AI · 结果生成', () => {
   it('「没有」这类回答不会被当成一条物品记录', async () => {
     const r = await ai.summarize(FULL_HISTORY)
     expect(r.things.join(' ')).not.toContain('没有')
+  })
+
+  it('状态块的回答按顺序落进身体 / 情绪 / 精力 / 心智', async () => {
+    const history: ChatMessage[] = [
+      msg('user', '睡得还行，运动基本没有，吃饭不太规律。', 'mood'),
+      msg('user', '整体有点闷，最消耗情绪的是方案反复改。', 'mood'),
+      msg('user', '上午状态最好，下午老被会议切开。', 'mood'),
+      msg('user', '看了一本讲定价的书，学到先算清成本再谈折扣。', 'mood'),
+    ]
+    const r = await ai.summarize(history)
+    expect(r.state.body).toContain('睡得还行')
+    expect(r.state.mood).toContain('有点闷')
+    expect(r.state.focus).toContain('上午状态最好')
+    expect(r.state.growth).toContain('定价')
+  })
+
+  it('「还好」这类非回答不会占掉状态里的位置', async () => {
+    const history: ChatMessage[] = [
+      msg('user', '还好。', 'mood'),
+      msg('user', '睡得还行，运动基本没有。', 'mood'),
+    ]
+    const r = await ai.summarize(history)
+    expect(r.state.body).toContain('睡得还行')
+    expect(r.state.mood).toBe('')
+  })
+
+  it('对账里没办成的事带着「上周说好的」前缀写进未办', async () => {
+    const r = await ai.summarize(FULL_HISTORY)
+    expect(r.pending[0]).toContain('上周说好的：')
+    expect(r.pending.join(' ')).toContain('初稿')
   })
 
   it('给出热点与三条下周建议', async () => {

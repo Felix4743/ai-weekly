@@ -3,8 +3,16 @@ import { AiError } from './aiError'
 import type { ChatRequest, ChatTransport } from './chatTransport'
 import { createInterview, openBlock } from './interview'
 import { createOpenAiClient } from './openAiClient'
-import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT } from './script'
-import { createEmptyResult, type AppConfig, type ChatMessage, type Dimension, type WeeklyResult } from './types'
+import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, SCRIPT } from './script'
+import {
+  createEmptyResult,
+  type AppConfig,
+  type ChatMessage,
+  type Depth,
+  type Dimension,
+  type InterviewState,
+  type WeeklyResult,
+} from './types'
 
 const PERSONA = '你是一个测试人设：说话像老同事，不爱客套。'
 
@@ -45,23 +53,31 @@ const HISTORY = [
   msg('user', '在改客户那个方案，改了三版还没定', 'event'),
 ]
 
-function withFollowUps(count: number) {
+function withFollowUps(count: number, depth: Depth | null = null): InterviewState {
   const base = createInterview()
   return {
-    active: 'event' as const,
+    active: 'event',
     blocks: {
       ...base.blocks,
       event: { askIndex: 0, followUpCount: count, complete: false, freeTurns: 0 },
     },
+    depth,
   }
 }
 
-/** 这一块的主问题已经问完，用户还想接着说 */
-function inFreeChat(freeTurns = 1) {
+/**
+ * 这一块的主问题已经问完，用户还想接着说。
+ * 追问次数刻意给到深度档上限，用来证明自由聊确实不受上限约束。
+ */
+function inFreeChat(freeTurns = 1, followUpCount = FOLLOWUP_CAPS.deep): InterviewState {
   const base = createInterview()
   return {
-    active: 'event' as const,
-    blocks: { ...base.blocks, event: { ...base.blocks.event, complete: true, freeTurns } },
+    active: 'event',
+    blocks: {
+      ...base.blocks,
+      event: { ...base.blocks.event, complete: true, freeTurns, followUpCount },
+    },
+    depth: 'deep',
   }
 }
 
@@ -70,30 +86,47 @@ describe('真实模型客户端 · 一轮回复', () => {
     const { transport } = scriptedTransport(['[追问]\n这件事哪一部分最花时间？'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(true)
+    expect(turn.action).toBe('followup')
     expect(turn.message).toBe('这件事哪一部分最花时间？')
   })
 
-  it('[换题] 时不追问', async () => {
+  it('[换题] 时换到下一题', async () => {
     const { transport } = scriptedTransport(['[换题]那有没有本来打算做、结果没做成的事？'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
+    expect(turn.action).toBe('next')
     expect(turn.message).toContain('本来打算做')
+  })
+
+  it('[换块] 时这一块收尾，交给上层开下一块', async () => {
+    const { transport } = scriptedTransport(['[换块]这块先到这儿，接着聊聊人。'])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+    expect(turn.action).toBe('block')
+    expect(turn.message).toBe('这块先到这儿，接着聊聊人。')
   })
 
   it('状态机才是追问次数的最终裁判：模型想追问但已到上限，按换题处理', async () => {
     const { transport } = scriptedTransport(['[追问]\n再问一句'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(withFollowUps(MAX_FOLLOWUPS_PER_QUESTION), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
+    const turn = await ai.reply(withFollowUps(DEFAULT_FOLLOWUP_CAP), 'event', HISTORY)
+    expect(turn.action).toBe('next')
+    // 降级只改动作，模型说的话照旧给出来
+    expect(turn.message).toBe('再问一句')
   })
 
-  it('模型没给标记时按换题处理，保证四个区块都被覆盖', async () => {
+  it('快速档只允许追一次，到顶后模型说要追也降级成换题', async () => {
+    const { transport } = scriptedTransport(['[追问]\n再问一句'])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    const turn = await ai.reply(withFollowUps(FOLLOWUP_CAPS.fast, 'fast'), 'event', HISTORY)
+    expect(turn.action).toBe('next')
+  })
+
+  it('模型没给标记时按换题处理，保证每个区块都被覆盖', async () => {
     const { transport } = scriptedTransport(['那后来呢？'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
+    expect(turn.action).toBe('next')
     expect(turn.message).toBe('那后来呢？')
   })
 
@@ -101,7 +134,8 @@ describe('真实模型客户端 · 一轮回复', () => {
     const { transport } = scriptedTransport(['[追问]\n   '])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.message.trim().length).toBeGreaterThan(0)
+    expect(turn.action).toBe('followup')
+    expect(turn.message).toContain('这周主要忙了些什么')
   })
 
   it('一次请求就够了：带上模型名、完整对话与进度信息', async () => {
@@ -138,7 +172,9 @@ describe('真实模型客户端 · 专属采访者', () => {
     const system = seen[0].messages.find((m) => m.role === 'system')?.content ?? ''
     expect(system).toContain(PERSONA)
     expect(system).toContain('[追问]')
-    expect(system).toContain('一次只问一件事')
+    expect(system).toContain('[换题]')
+    expect(system).toContain('[换块]')
+    expect(system).toContain('不要编造')
   })
 
   it('换一段人设就换一套口气，不用重启应用', async () => {
@@ -163,7 +199,7 @@ describe('真实模型客户端 · 专属采访者', () => {
     const { transport } = scriptedTransport(['[追问]\n那这件事后来呢？'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(true)
+    expect(turn.action).toBe('followup')
     expect(turn.message).toBe('那这件事后来呢？')
   })
 
@@ -171,7 +207,10 @@ describe('真实模型客户端 · 专属采访者', () => {
     const { transport } = scriptedTransport(['[追问]\n   '])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
-    const lastQuestion = SCRIPT[0].mainQuestions[SCRIPT[0].mainQuestions.length - 1]
+    const eventQuestions = SCRIPT.find((d) => d.key === 'event')?.mainQuestions ?? []
+    const lastQuestion = eventQuestions[eventQuestions.length - 1]
+    expect(lastQuestion.length).toBeGreaterThan(0)
+    expect(turn.action).toBe('followup')
     expect(turn.message).not.toContain(lastQuestion)
     expect(turn.message.trim().length).toBeGreaterThan(0)
   })

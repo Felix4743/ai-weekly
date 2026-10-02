@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { describeError } from '../src/core/aiError'
 import type { ChatTransport } from '../src/core/chatTransport'
-import { createInterview, isBlockComplete, nextStep, openBlock } from '../src/core/interview'
+import { createInterview, isBlockComplete, nextStep, openBlock, setDepth } from '../src/core/interview'
 import { createOpenAiClient } from '../src/core/openAiClient'
 import { SCRIPT, TOTAL_MAIN_QUESTIONS } from '../src/core/script'
 import {
@@ -54,13 +54,21 @@ function loadAppConfig(): { config: AppConfig; from: string } | null {
 const found = loadAppConfig()
 
 /**
- * 有细节可挖的假回答，每块 8 条、互不重复。
+ * 有细节可挖的假回答。
  *
- * 刻意写满 8 条：第一版只有 4 条、用完了就重复最后一条，结果模型后半个区块
+ * 内容块刻意写满 8 条：第一版只有 4 条、用完了就重复最后一条，结果模型后半个区块
  * 一直在面对同一句话，behavior 读起来像复读机 —— 那是工具的锅，不是模型的。
- * 真实用户不会把同一句答案说八遍。
+ * 真实用户不会把同一句答案说八遍。「上周对账」是单题，给 6 条够走完。
  */
 const ANSWERS: Record<Dimension, string[]> = {
+  reconcile: [
+    '上周说好的报价发出去了，但只发了初稿，对方还没回。',
+    '要跟进的张总一直没约上，我总觉得自己还没准备好。',
+    '上周定的整理数据没做完，卡在要从三个系统里导。',
+    '说好早起运动，只坚持了两天就断了。',
+    '本来要写的那份复盘一直拖着，这周还是没动笔。',
+    '约小李吃饭吃成了，还聊出两个新想法。',
+  ],
   event: [
     '主要在改客户那个方案，来回改了三版还没定，最花时间的是等对方拍板。',
     '本来想把这季度的数据整理一下，一直没腾出时间，卡在数据要从三个系统里导。',
@@ -105,7 +113,7 @@ const ANSWERS: Record<Dimension, string[]> = {
 
 const MAX_ANSWERS_PER_BLOCK = 12
 
-type Marker = '追问' | '换题' | '无标记'
+type Marker = '追问' | '换题' | '换块' | '无标记'
 
 interface Turn {
   dim: Dimension
@@ -120,6 +128,7 @@ function markerOf(raw: string): Marker {
   const head = raw.trimStart().slice(0, 6)
   if (head.startsWith('[追问]')) return '追问'
   if (head.startsWith('[换题]')) return '换题'
+  if (head.startsWith('[换块]')) return '换块'
   return '无标记'
 }
 
@@ -156,7 +165,7 @@ function buildReport(input: {
   lines.push(
     `- 其中 [追问] ${counted.filter((m) => m === '追问').length} 轮，[换题] ${
       counted.filter((m) => m === '换题').length
-    } 轮`,
+    } 轮，[换块] ${counted.filter((m) => m === '换块').length} 轮`,
   )
   lines.push(
     `- 单轮耗时：平均 ${aiTurns.length ? Math.round(totalMs / aiTurns.length / 100) / 10 : 0}s，最慢 ${
@@ -249,6 +258,9 @@ describe('真模型试跑台', () => {
 
       try {
         for (const block of SCRIPT) {
+          // 0.9.1 的流程是「状态 → 定深度 → 上周对账 → 事情 → 人际 → 物与钱」。
+          // 真实使用时定档是用户点按钮挑的，试跑台固定用中度档，好让追问上限稳定。
+          if (block.key !== 'mood') state = setDepth(state, 'mid')
           state = openBlock(state, block.key)
           const dim = block.key
           const openingFrom = calls.length
@@ -274,7 +286,7 @@ describe('真模型试跑台', () => {
               marker: markerOf(call?.raw ?? ''),
               ms: call?.ms,
             })
-            state = nextStep(state, dim, turn.wantsFollowUp)
+            state = nextStep(state, dim, turn.action)
             say('ai', turn.message, dim)
             answered += 1
           }
