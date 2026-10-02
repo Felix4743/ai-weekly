@@ -1,16 +1,24 @@
 import type { ReactNode } from 'react'
 import type { ListKey } from '../core/resultEdit'
 import { countSection } from '../core/outline'
-import type { PersonNote, WeeklyResult } from '../core/types'
+import type { PersonNote, WeeklyResult, WeeklyState } from '../core/types'
 import { CollapsibleCard, type CollapsibleKey } from './CollapsibleCard'
 import { EditableList, EditablePeople } from './EditableList'
 
 /**
- * 一份结果的正文：四栏清单（可折叠）+ 本周主线 + 下周计划。
+ * 一份结果的正文：五栏清单（可折叠）+ 本周主线 + 下周计划。
  *
  * 结果页和总览页共用它 —— 两边看的是同一份结构，区别只在于
  * 「改的是本周」还是「改的是某一周的存档」，以及下周计划卡片底部多不多一块东西。
  */
+
+/** 状态那一段的四行：0.9.1 只存文字，不打分 */
+const STATE_FIELDS: { key: keyof WeeklyState; label: string; placeholder: string }[] = [
+  { key: 'body', label: '身体', placeholder: '睡眠、运动、吃饭…' },
+  { key: 'mood', label: '情绪', placeholder: '这周心里怎么样…' },
+  { key: 'focus', label: '精力', placeholder: '什么时候状态最好…' },
+  { key: 'growth', label: '心智', placeholder: '读了什么、学到什么…' },
+]
 
 interface Props {
   result: WeeklyResult
@@ -30,6 +38,8 @@ export function ResultBody({
 }: Props) {
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
+  const setStateField = (key: keyof WeeklyState, value: string) =>
+    onResultChange({ ...result, state: { ...result.state, [key]: value } })
 
   return (
     <>
@@ -93,6 +103,29 @@ export function ResultBody({
           addLabel="添加一条"
           emptyText="（没有未办的事）"
         />
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        sectionKey="state"
+        title="状态"
+        desc="身体、情绪、精力、心智各一句 · 想改就直接改"
+        count={countSection(result, 'state')}
+        collapsed={collapsed.state}
+        onToggle={() => onToggle('state')}
+      >
+        <div className="state-form">
+          {STATE_FIELDS.map((f) => (
+            <label key={f.key} className="state-row">
+              <span className="state-label">{f.label}</span>
+              <input
+                className="edit-input"
+                value={result.state[f.key]}
+                placeholder={f.placeholder}
+                onChange={(e) => setStateField(f.key, e.target.value)}
+              />
+            </label>
+          ))}
+        </div>
       </CollapsibleCard>
 
       <section className="card highlight-card" id="section-highlights">

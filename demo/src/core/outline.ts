@@ -1,13 +1,21 @@
 import type { WeeklyResult } from './types'
 
-/** 结果页的六个区块，顺序即页面上的先后顺序 */
-export type SectionKey = 'events' | 'people' | 'things' | 'pending' | 'highlights' | 'plan'
+/** 结果页的七个区块，顺序即页面上的先后顺序 */
+export type SectionKey =
+  | 'events'
+  | 'people'
+  | 'things'
+  | 'pending'
+  | 'state'
+  | 'highlights'
+  | 'plan'
 
 export const SECTION_KEYS: SectionKey[] = [
   'events',
   'people',
   'things',
   'pending',
+  'state',
   'highlights',
   'plan',
 ]
@@ -17,6 +25,7 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   people: '人际',
   things: '物品',
   pending: '未办',
+  state: '状态',
   highlights: '本周主线',
   plan: '下周计划',
 }
@@ -45,6 +54,11 @@ export function countSection(result: WeeklyResult, key: SectionKey): number {
       return result.things.length
     case 'pending':
       return result.pending.length
+    // 状态四项各算一条：写了几项就显示几
+    case 'state':
+      return [result.state.body, result.state.mood, result.state.focus, result.state.growth].filter(
+        (t) => t.trim().length > 0,
+      ).length
     case 'highlights':
       return result.highlights.length
     case 'plan':

@@ -6,8 +6,10 @@ import {
   coveragePercent,
   createInterview,
   finishAll,
+  nextStage,
   nextStep,
   openBlock,
+  setDepth,
 } from './core/interview'
 import { sampleAnswer } from './core/mockAi'
 import { stripMarkerForDisplay } from './core/turn'
@@ -16,11 +18,13 @@ import {
   nextId,
   type AppConfig,
   type ChatMessage,
+  type Depth,
   type Dimension,
+  type InterviewContext,
   type InterviewState,
   type WeeklyResult,
 } from './core/types'
-import { weekKeyOf, type WeekKey } from './core/week'
+import { addWeeks, weekKeyOf, type WeekKey } from './core/week'
 import {
   loadArchive,
   loadConfig,
@@ -143,6 +147,23 @@ export default function App() {
     [commitArchive],
   )
 
+  /* ---------------- 上周的上下文 ---------------- */
+
+  /**
+   * 上一周定下来的东西（下周重点 + 要跟进的人）。
+   *
+   * 「上周对账」要先知道上周说过什么才有据可依 —— 这一份上下文同时决定两件事：
+   * 提示词里复述什么，以及这一步要不要跳过（上一周没有记录就没有对账）。
+   */
+  const interviewContext = useCallback((): InterviewContext => {
+    const lastKey = addWeeks(weekKeyOf(new Date()), -1)
+    const entry = archiveRef.current.find((e) => e.week === lastKey)
+    if (!entry) return {}
+    const { nextFocus, nextFollowUps } = entry.result
+    if (nextFocus.length === 0 && nextFollowUps.length === 0) return {}
+    return { lastWeek: { focus: nextFocus, followUps: nextFollowUps }, lastWeekKey: lastKey }
+  }, [])
+
   /* ---------------- 流式累积 ---------------- */
 
   const resetStream = useCallback(() => {
@@ -171,7 +192,9 @@ export default function App() {
     busyRef.current = true
     resetStream()
     commitMessages([])
-    const fresh = openBlock(createInterview(), 'event')
+    // 每一次梳理都从「状态」开始；上一周没记录的话，「上周对账」这一步直接跳过
+    const ctx = interviewContext()
+    const fresh = openBlock(createInterview({ hasLastWeek: Boolean(ctx.lastWeek) }), 'mood')
     commitInterview(fresh)
     resultRef.current = null
     setResult(null)
@@ -181,8 +204,8 @@ export default function App() {
     setPage('chat')
     setTyping(true)
     try {
-      const text = await ai.nextMessage(fresh, 'event', [], pushDelta)
-      commitMessages([aiMessage(text, 'event')])
+      const text = await ai.nextMessage(fresh, 'mood', [], pushDelta, ctx)
+      commitMessages([aiMessage(text, 'mood')])
       setError(null)
     } catch (err) {
       setError(describeError(err))
@@ -191,7 +214,7 @@ export default function App() {
       setTyping(false)
       busyRef.current = false
     }
-  }, [ai, commitInterview, commitMessages, commitResultWeek, pushDelta, resetStream])
+  }, [ai, commitInterview, commitMessages, commitResultWeek, interviewContext, pushDelta, resetStream])
 
   // 首次挂载：若已配置过则直接进入对话
   const bootedRef = useRef(false)
@@ -206,7 +229,7 @@ export default function App() {
   const runSummarize = useCallback(async () => {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
     try {
-      const r = await ai.summarize(messagesRef.current)
+      const r = await ai.summarize(messagesRef.current, interviewContext())
       // 生成的那一刻定下它属于哪一周 —— 之后再编辑、重新整理都跟着这一周走
       commitResultWeek(weekKeyOf(new Date()))
       commitResult(r)
@@ -217,7 +240,7 @@ export default function App() {
     } finally {
       setOverlay(null)
     }
-  }, [ai, commitResult, commitResultWeek])
+  }, [ai, commitResult, commitResultWeek, interviewContext])
 
   /** 用户自己点开某一块；如果是第一次打开，让 AI 先开口 */
   const handleOpenBlock = useCallback(
@@ -237,7 +260,7 @@ export default function App() {
       setTyping(true)
       resetStream()
       try {
-        const text = await ai.nextMessage(opened, dim, messagesRef.current, pushDelta)
+        const text = await ai.nextMessage(opened, dim, messagesRef.current, pushDelta, interviewContext())
         commitMessages([...messagesRef.current, aiMessage(text, dim)])
         setError(null)
       } catch (err) {
@@ -248,7 +271,7 @@ export default function App() {
         busyRef.current = false
       }
     },
-    [ai, commitInterview, commitMessages, pushDelta, resetStream],
+    [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
   const handleSend = useCallback(
@@ -266,10 +289,30 @@ export default function App() {
       ])
 
       try {
-        // 一次调用同时拿到「要不要追问」和「下一句话」
+        // 一次调用同时拿到「这一轮想干什么」和「下一句话」
         const turn = await ai.reply(interviewRef.current, dim, messagesRef.current, pushDelta)
-        commitInterview(nextStep(interviewRef.current, dim, turn.wantsFollowUp))
+        const advanced = nextStep(interviewRef.current, dim, turn.action)
+
+        // 模型判定「这块聊够了」（[换块]）：顺手把流程里的下一块打开，别让他再点一次。
+        // 下一步是「定档」或「全聊完了」时不自动往下走，那两种要留给用户决定。
+        const stage = turn.action === 'block' ? nextStage(advanced) : null
+        const followUpBlock = stage?.kind === 'block' && stage.dim !== dim ? stage.dim : null
+        const next = followUpBlock ? openBlock(advanced, followUpBlock) : advanced
+
+        commitInterview(next)
         commitMessages([...messagesRef.current, aiMessage(turn.message, dim)])
+
+        if (followUpBlock) {
+          resetStream()
+          const opening = await ai.nextMessage(
+            next,
+            followUpBlock,
+            messagesRef.current,
+            pushDelta,
+            interviewContext(),
+          )
+          commitMessages([...messagesRef.current, aiMessage(opening, followUpBlock)])
+        }
         setError(null)
       } catch (err) {
         setError(describeError(err))
@@ -279,7 +322,43 @@ export default function App() {
         busyRef.current = false
       }
     },
-    [ai, commitInterview, commitMessages, pushDelta, resetStream],
+    [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
+  )
+
+  /** 用户挑了复盘深度：定档，然后把下一块打开 */
+  const handlePickDepth = useCallback(
+    async (depth: Depth) => {
+      if (busyRef.current) return
+      const chosen = setDepth(interviewRef.current, depth)
+      commitInterview(chosen)
+
+      const stage = nextStage(chosen)
+      if (stage.kind !== 'block' || interviewRef.current.active === stage.dim) return
+
+      busyRef.current = true
+      setTyping(true)
+      resetStream()
+      try {
+        const opened = openBlock(chosen, stage.dim)
+        commitInterview(opened)
+        const text = await ai.nextMessage(
+          opened,
+          stage.dim,
+          messagesRef.current,
+          pushDelta,
+          interviewContext(),
+        )
+        commitMessages([...messagesRef.current, aiMessage(text, stage.dim)])
+        setError(null)
+      } catch (err) {
+        setError(describeError(err))
+      } finally {
+        resetStream()
+        setTyping(false)
+        busyRef.current = false
+      }
+    },
+    [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
   const handleGenerate = useCallback(async () => {
@@ -426,6 +505,7 @@ export default function App() {
           hasAnyAnswer={hasAnyAnswer}
           onOpenBlock={handleOpenBlock}
           onSend={handleSend}
+          onPickDepth={handlePickDepth}
           onGenerate={handleGenerate}
         />
       )}

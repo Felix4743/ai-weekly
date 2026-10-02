@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { SCRIPT, dimensionLabel, dimensionScript } from '../core/script'
+import { CONTENT_BLOCKS, DEPTHS, dimensionLabel, dimensionScript } from '../core/script'
 import {
   answeredInBlock,
   isAllComplete,
   isBlockComplete,
-  nextIncompleteBlock,
+  nextStage,
   questionsInBlock,
 } from '../core/interview'
-import type { ChatMessage, Dimension, InterviewState } from '../core/types'
+import type { ChatMessage, Depth, Dimension, InterviewState } from '../core/types'
 
 interface Props {
   messages: ChatMessage[]
@@ -21,6 +21,8 @@ interface Props {
   hasAnyAnswer: boolean
   onOpenBlock: (dim: Dimension) => void
   onSend: (text: string) => void
+  /** 用户点了深度 / 中度 / 快速复盘 */
+  onPickDepth: (depth: Depth) => void
   onGenerate: () => void
 }
 
@@ -35,6 +37,7 @@ export function ChatPage({
   hasAnyAnswer,
   onOpenBlock,
   onSend,
+  onPickDepth,
   onGenerate,
 }: Props) {
   const [draft, setDraft] = useState('')
@@ -45,10 +48,13 @@ export function ChatPage({
   const script = active ? dimensionScript(active) : undefined
   const blockMessages = active ? messages.filter((m) => m.dimension === active) : []
   const activeComplete = active ? isBlockComplete(interview, active) : false
-  const nextDim = nextIncompleteBlock(interview)
+  const stage = nextStage(interview)
+  const nextDim = stage.kind === 'block' ? stage.dim : null
   const allDone = isAllComplete(interview)
+  /** 状态聊完、还没定档：这一步由用户点按钮决定，不让模型猜 */
+  const showDepth = stage.kind === 'depth'
   /** 发送下面那排「聊一聊XX」：当前这一块不用再跳过去 */
-  const otherBlocks = SCRIPT.filter((d) => d.key !== active)
+  const otherBlocks = CONTENT_BLOCKS.filter((d) => d.key !== active)
 
   useEffect(() => {
     const el = bodyRef.current
@@ -70,9 +76,9 @@ export function ChatPage({
 
   return (
     <main className="page chat">
-      {/* 顶部四个词，点哪一个就整页切到哪一块 */}
+      {/* 顶部四个词，点哪一个就整页切到哪一块（「上周对账」是流程里的一步，不占标签） */}
       <nav className="tab-bar" role="tablist">
-        {SCRIPT.map((d) => {
+        {CONTENT_BLOCKS.map((d) => {
           const complete = isBlockComplete(interview, d.key)
           const hasAnswer = messages.some((m) => m.dimension === d.key && m.role === 'user')
           const status: 'todo' | 'doing' | 'done' = complete
@@ -105,6 +111,31 @@ export function ChatPage({
       <div className="progress-track">
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
+
+      {/* 定档：三个按钮，选完才开始往下聊 */}
+      {showDepth && (
+        <section className="depth-picker">
+          <div className="depth-lead">
+            状态聊完了。接下来想聊到多细？选一个就行，聊到一半想改也可以。
+          </div>
+          <div className="depth-options">
+            {DEPTHS.map((d) => (
+              <button
+                key={d.id}
+                className="btn depth"
+                type="button"
+                disabled={busy}
+                onClick={() => onPickDepth(d.id)}
+              >
+                <span className="depth-label">{d.label}</span>
+                <span className="depth-meta">
+                  约 {d.minutes} 分钟 · 每题最多追问 {d.followUpCap} 次
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="stage">
         <header className="stage-head">
@@ -188,7 +219,7 @@ export function ChatPage({
             </button>
           )}
 
-          {activeComplete && nextDim && (
+          {activeComplete && nextDim && nextDim !== active && (
             <button
               className="btn subtle"
               type="button"
@@ -199,7 +230,9 @@ export function ChatPage({
             </button>
           )}
 
-          {activeComplete && !nextDim && <span className="idle-hint">四块都聊完了</span>}
+          {activeComplete && !nextDim && stage.kind === 'done' && (
+            <span className="idle-hint">四块都聊完了</span>
+          )}
 
           <button
             className={`btn generate${allDone ? ' primary' : ''}`}

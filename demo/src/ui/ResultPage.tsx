@@ -10,7 +10,7 @@ import {
 } from '../core/outline'
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
-import { ALL_COLLAPSED, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
 import { ResultBody } from './ResultBody'
 
 interface Props {
@@ -25,10 +25,6 @@ interface Props {
   onRestart: () => void
   onBack: () => void
   onOpenHistory: () => void
-}
-
-function isCollapsible(key: SectionKey): key is CollapsibleKey {
-  return (['events', 'people', 'things', 'pending'] as SectionKey[]).includes(key)
 }
 
 export function ResultPage({

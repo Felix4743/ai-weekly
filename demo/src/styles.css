@@ -443,6 +443,56 @@ body {
   transition: width 0.4s ease;
 }
 
+/* ---------- 定档：状态聊完之后，先选聊多细 ---------- */
+
+.depth-picker {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.depth-lead {
+  margin-bottom: 10px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.depth-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn.depth {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 9px 14px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.btn.depth:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.depth-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.depth-meta {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 /* ---------- 顶部分页：点一下就整页切到那一块 ---------- */
 
 .tab-bar {
@@ -1150,6 +1200,40 @@ body {
 .edit-hint {
   margin-left: 6px;
   color: var(--ink-3);
+}
+
+/* ---------- 状态卡：四行文字，各一句 ---------- */
+
+.state-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.state-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.state-label {
+  flex: 0 0 auto;
+  width: 34px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* 状态是常驻可编辑的，不像清单那样点开才编辑：平时不要一直亮着主色 */
+.state-row .edit-input {
+  border-color: var(--line);
+  box-shadow: none;
+  background: var(--panel);
+}
+
+.state-row .edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: #fff;
 }
 
 .badge-ai {

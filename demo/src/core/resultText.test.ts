@@ -74,6 +74,30 @@ describe('结果导出为 Markdown', () => {
     }
   })
 
+  it('状态四项写进「状态」一节，一行一项', () => {
+    const md = resultToMarkdown(FULL)
+    expect(md).toContain('## 状态')
+    expect(md).toContain('- 身体：睡得还行')
+    expect(md).toContain('- 情绪：这周一直悬着')
+    expect(md).toContain('- 精力：上午最好')
+    expect(md).toContain('- 心智：读了半本书')
+  })
+
+  it('状态四项都没写时留一个占位，不留空标题', () => {
+    const md = resultToMarkdown({ ...FULL, state: { body: '', mood: '  ', focus: '', growth: '' } })
+    const section = md.split('## 状态')[1].split('## 本周主线')[0]
+    expect(section).toContain('- （无）')
+    expect(section).not.toContain('- 身体：')
+  })
+
+  it('老结果没有 state 这一栏也不崩，状态一节给占位', () => {
+    const legacy = { ...FULL } as Partial<WeeklyResult>
+    delete legacy.state
+    const md = resultToMarkdown(legacy as WeeklyResult)
+    expect(md).toContain('## 状态')
+    expect(md.split('## 状态')[1].split('## 本周主线')[0]).toContain('- （无）')
+  })
+
   it('空结果用占位符而不是空白，保证可复制', () => {
     const md = resultToMarkdown(EMPTY)
     expect(md).toContain('（无）')

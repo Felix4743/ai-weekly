@@ -1,4 +1,4 @@
-import type { WeeklyResult } from './types'
+import { createEmptyState, type WeeklyResult } from './types'
 
 function bulletList(lines: string[], items: string[], empty = '（无）'): void {
   if (items.length === 0) {
@@ -36,6 +36,24 @@ export function resultToMarkdown(r: WeeklyResult): string {
 
   lines.push('**物品**')
   bulletList(lines, r.things)
+  lines.push('')
+
+  lines.push('## 状态', '')
+  // 0.9.1 才有的第八栏。旧结果从归档读回来时会被补成四个空串，
+  // 这里再兜一次底，免得「复制全文」在一个老对象上崩掉。
+  const st = r.state ?? createEmptyState()
+  const stateRows: [string, string][] = [
+    ['身体', st.body],
+    ['情绪', st.mood],
+    ['精力', st.focus],
+    ['心智', st.growth],
+  ]
+  const filled = stateRows.filter(([, text]) => text.trim().length > 0)
+  if (filled.length === 0) {
+    lines.push('- （无）')
+  } else {
+    for (const [label, text] of filled) lines.push(`- ${label}：${text.trim()}`)
+  }
   lines.push('')
 
   lines.push('## 本周主线', '')
