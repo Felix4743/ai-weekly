@@ -4,47 +4,60 @@
 
 ## 里面有什么
 
-| 目录 | 是什么 | 对应 tag |
-|---|---|---|
-| `mvp-v0.5/` | M0–M4 全部完成（文档 v0.5）时的源码快照 | `mvp-v0.5` |
-| `mvp-v0.8/` | M0–M7 全部完成（文档 v0.8）时的源码快照 | `mvp-v0.8` |
-| `ai-weekly/` | **装好的应用本体**（装的是最新打出来的那一版，和上面的快照不一定同版），点开就能用；不是源码，也不进版本库 | — |
+| 目录 | 是什么 |
+|---|---|
+| `ai-weekly/` | **装好的应用本体**（装的是最新打出来的那一版），点开就能用；不是源码，也不进版本库 |
+| `README.md` | 就是这份说明 |
 
-快照是用 `git archive` 从 tag 导出的**纯源码**：`mvp-v0.5` 是 75 个文件 / 0.5 MB，
-`mvp-v0.8` 是 91 个文件 / 0.67 MB，都不含 `node_modules`、不含 `dist/`、不含任何 exe ——
-每个文件都逐个比对过 blob 哈希与 tag 一致，一个不差。
+以前这里还放着两份源码快照（`mvp-v0.5/`、`mvp-v0.8/`），已经删掉了 —— 内容一个字都不会丢：
+它们本来就是从 tag 里导出来的，需要时用同一条命令（见下）再导一次就行；文件本身也还在
+提交历史里（是 `9b7f7c8` 那次提交加进来的，`git show 9b7f7c8:mvp/mvp-v0.8/demo/package.json` 还看得到）。
 
-**只给里程碑版本导快照。** 中间的版本只打 tag、不导文件夹 —— 否则这里会堆十几份几乎
-一模一样的源码，翻起来比 tag 还麻烦。要看中间版本：`git checkout mvp-v0.8.1`。
-（`mvp-v0.6` 到 `mvp-v0.8` 之间的 0.7 那批改动当时漏了 tag，只能在提交历史里看。）
-
-## 为什么既有 tag 又有这个文件夹
-
-- **tag 才是权威版本**：`git checkout mvp-v0.8` 能拿到完整历史、能 diff、能回滚，且不额外占空间。
-- **这个文件夹是给人翻的**：手上没 git、或者不想 checkout 的时候，点开就能看见当时长什么样。
-
-两者内容一致，所以：
-
-> **不要在这里改代码。** 它是一份冻结的存档 —— 改了不生效，也不会有人知道。
-> 要改就改 `demo/`，改完按需要打新的 tag。
-
-## 怎么归档下一份
+## 回看旧版本：用 tag，不要用文件夹
 
 ```powershell
-# 1) 给当前状态打 tag（权威版本）
-git tag -a mvp-v0.9 -F 一段说明.txt
+git tag --list 'mvp*'                  # 有哪些：mvp-v0.5 / mvp-v0.6 / mvp-v0.8 / mvp-v0.8.1
+git log --oneline --decorate           # 哪个提交是哪个 tag
 
-# 2) 导出源码快照到本目录
-#    ⚠️ 必须显式列出要哪些顶层路径，不能直接 git archive <tag>：
-#       mvp/ 自己已经进了版本库，整棵树导出会把 mvp/mvp-v0.5/ 一起塞进新快照里，
-#       于是出现 mvp/mvp-v0.9/mvp/mvp-v0.5/ 这种套娃。
-#    ⚠️ 中文文件名必须走 zip；tar 在 Windows 上会把 docs/ 里的中文名解坏（实测踩过）。
-git archive --format=zip -o "$env:TEMP\snap.zip" mvp-v0.9 AGENTS.md .gitignore demo docs
-Expand-Archive -Path "$env:TEMP\snap.zip" -DestinationPath mvp\mvp-v0.9 -Force
+git show mvp-v0.8:demo/package.json    # 只看一个文件，不用切
+git diff mvp-v0.8 mvp-v0.8.1 --stat    # 两版之间差了什么、改了多少
 
-# 3) 让新目录进版本库：根 .gitignore 里 mvp/* 默认整块忽略，要单独放行
-#    !mvp/mvp-v0.9/
+git checkout mvp-v0.8                  # 整棵树切到那一版（看完切回来：git checkout main）
 ```
+
+`mvp-v0.6` 到 `mvp-v0.8` 之间的 0.7 那批改动当时漏了 tag，只能在提交历史里看。
+
+**为什么不留快照文件夹**：一份快照和它对应的 tag 内容完全一样，却多占一份工作区，
+翻目录时还要在两份几乎相同的源码里挑，更容易让人误以为这里才是源码。tag 能 checkout、
+能 diff、能回滚，也不额外占空间 —— 有 git 就没必要再抄一份。
+
+代价得说清楚：**tag 在 `.git` 里，而 `.git` 和这个工作区在同一块盘上，仓库也没有远端。**
+也就是说整个项目现在只有这一份拷贝。要真正的备份，得把仓库推到远端，或者导出一次
+`git bundle` 放到别的盘去。
+
+## 万一还要再导一次源码快照
+
+两个坑（都踩过，写下来省下一次）：
+
+```powershell
+# ⚠️ 必须显式列出顶层路径，不能直接 git archive <tag>：
+#    mvp/ 自己进了版本库，整棵树导出会把 mvp/ 一起塞进去，于是变成
+#    mvp/mvp-v0.9/mvp/mvp-v0.5/ 这种套娃。
+# ⚠️ 中文文件名必须走 zip；tar 在 Windows 上会把 docs/ 里的中文名解坏（实测踩过）。
+git archive --format=zip -o "$env:TEMP\snap.zip" mvp-v0.9 AGENTS.md .gitignore demo docs
+Expand-Archive -Path "$env:TEMP\snap.zip" -DestinationPath "$env:TEMP\mvp-v0.9" -Force
+```
+
+导到仓库外面去就行（比如别的盘）。要是导回 `mvp/`，还得在 `.gitignore` 里单独放行
+（`!mvp/mvp-v0.9/`），再占一份版本库空间 —— 没必要。
+
+## 归档下一份：打个 tag 就够了
+
+```powershell
+git tag -a mvp-v0.9 -m "0.9：一句话说清这一版做了什么"
+```
+
+tag 是权威版本：能 checkout、能 diff、能回滚。**不再往本目录导源码快照。**
 
 ## 打包产物不在这里
 
