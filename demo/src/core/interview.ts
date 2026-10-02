@@ -1,10 +1,20 @@
 import {
-  MAX_FOLLOWUPS_PER_QUESTION,
+  CONTENT_BLOCKS,
   SCRIPT,
   TOTAL_MAIN_QUESTIONS,
   dimensionScript,
+  followUpCap,
 } from './script'
-import type { BlockProgress, BlockProgressMap, Dimension, InterviewState } from './types'
+import type {
+  BlockProgress,
+  BlockProgressMap,
+  Depth,
+  Dimension,
+  InterviewState,
+  TurnAction,
+} from './types'
+
+export type { TurnAction }
 
 const EMPTY_PROGRESS: BlockProgress = {
   askIndex: 0,
@@ -13,12 +23,21 @@ const EMPTY_PROGRESS: BlockProgress = {
   freeTurns: 0,
 }
 
-export function createInterview(): InterviewState {
+export interface CreateInterviewOptions {
+  /** 上一周有没有记录；没有就把「上周对账」这一步直接标成已过 */
+  hasLastWeek?: boolean
+}
+
+export function createInterview(options: CreateInterviewOptions = {}): InterviewState {
+  const { hasLastWeek = true } = options
   const blocks = {} as BlockProgressMap
   for (const d of SCRIPT) {
     blocks[d.key] = { ...EMPTY_PROGRESS }
   }
-  return { active: null, blocks }
+  if (!hasLastWeek) {
+    blocks.reconcile = { ...EMPTY_PROGRESS, complete: true }
+  }
+  return { active: null, blocks, depth: null }
 }
 
 export function blockProgress(s: InterviewState, dim: Dimension): BlockProgress {
@@ -53,16 +72,36 @@ export function isFollowUpTurn(s: InterviewState, dim: Dimension): boolean {
   return blockProgress(s, dim).followUpCount > 0
 }
 
-/* ---------------- 推进 ---------------- */
+/* ---------------- 深度档位 ---------------- */
 
 /**
+ * 定档。
+ *
+ * 档位只决定两件事：每道题最多追几次（安全上限，判定还是靠「问到效果没有」），
+ * 以及提示词里怎么把握节奏。中途改口就再调一次，不锁死。
+ */
+export function setDepth(s: InterviewState, depth: Depth): InterviewState {
+  if (s.depth === depth) return s
+  return { ...s, depth }
+}
+
+export function currentFollowUpCap(s: InterviewState): number {
+  return followUpCap(s.depth)
+}
+
+/* ---------------- 推进 ---------------- */
+
+/** 模型这一轮想干什么：接着追 / 换下一题 / 这块聊够了换下一块 */
+/**
  * 在某个区块内推进一步。
- * 是否追问由 AI 提议，但次数上限与区块推进由状态机硬性约束。
+ *
+ * 换下一块由模型判定（`[换块]`），状态机只兜两件事：
+ * 追问次数上限（防审讯），以及参考清单问完之后自动收尾（兜底，防止原地打转）。
  */
 export function nextStep(
   s: InterviewState,
   dim: Dimension,
-  aiWantsFollowUp: boolean,
+  action: TurnAction,
 ): InterviewState {
   const script = dimensionScript(dim)
   if (!script) return s
@@ -82,7 +121,16 @@ export function nextStep(
     }
   }
 
-  if (aiWantsFollowUp && p.followUpCount < MAX_FOLLOWUPS_PER_QUESTION) {
+  // 模型判定「这块的关键都拿到了」：直接收尾，不再数题
+  if (action === 'block') {
+    return {
+      ...s,
+      blocks: { ...s.blocks, [dim]: { ...p, followUpCount: 0, complete: true } },
+    }
+  }
+
+  const cap = followUpCap(s.depth)
+  if (action === 'followup' && p.followUpCount < cap) {
     return {
       ...s,
       blocks: { ...s.blocks, [dim]: { ...p, followUpCount: p.followUpCount + 1 } },
@@ -100,7 +148,7 @@ export function nextStep(
     }
   }
 
-  // 这一块的主问题聊完了，但保持它仍然是当前展开的块
+  // 参考清单问完了，自动收尾（正常情况模型会先给出 [换块]）
   return {
     ...s,
     blocks: { ...s.blocks, [dim]: { ...p, followUpCount: 0, complete: true } },
@@ -116,7 +164,32 @@ export function isFreeChat(s: InterviewState, dim: Dimension): boolean {
 export function finishAll(s: InterviewState): InterviewState {
   const blocks = {} as BlockProgressMap
   for (const d of SCRIPT) blocks[d.key] = { ...blockProgress(s, d.key), complete: true }
-  return { active: s.active, blocks }
+  return { active: s.active, blocks, depth: s.depth }
+}
+
+/* ---------------- 流程走到哪儿了 ---------------- */
+
+export type Stage =
+  | { kind: 'block'; dim: Dimension }
+  | { kind: 'depth' }
+  | { kind: 'done' }
+
+/**
+ * 这一刻该干什么。纯函数，UI 与 App 都靠它，避免各自记一套顺序。
+ *
+ * 顺序：状态没聊完 → 状态；聊完了还没定档 → 等用户挑档位；
+ * 然后按 SCRIPT 顺序走（对账 → 事情 → 人际 → 物与钱），全完 → done。
+ */
+export function nextStage(s: InterviewState): Stage {
+  const mood = blockProgress(s, 'mood')
+  if (!mood.complete) return { kind: 'block', dim: 'mood' }
+  if (s.depth === null) return { kind: 'depth' }
+
+  for (const d of SCRIPT) {
+    if (d.key === 'mood') continue
+    if (!blockProgress(s, d.key).complete) return { kind: 'block', dim: d.key }
+  }
+  return { kind: 'done' }
 }
 
 /* ---------------- 进度与统计 ---------------- */
@@ -143,13 +216,14 @@ export function questionsInBlock(dim: Dimension): number {
   return dimensionScript(dim)?.mainQuestions.length ?? 0
 }
 
+/** 覆盖率只算四个内容块；「上周对账」是流程里的一道小题，不占进度 */
 export function coveragePercent(s: InterviewState): number {
-  const done = SCRIPT.reduce((n, d) => n + answeredInBlock(s, d.key), 0)
+  const done = CONTENT_BLOCKS.reduce((n, d) => n + answeredInBlock(s, d.key), 0)
   const pct = (done / TOTAL_MAIN_QUESTIONS) * 100
   return Math.max(0, Math.min(100, Math.round(pct)))
 }
 
-/** 下一个还没聊完的区块，用于给出「接着聊」的建议 */
+/** 下一个还没聊完的内容块，用于给出「接着聊」的建议 */
 export function nextIncompleteBlock(s: InterviewState): Dimension | null {
-  return SCRIPT.find((d) => !blockProgress(s, d.key).complete)?.key ?? null
+  return CONTENT_BLOCKS.find((d) => !blockProgress(s, d.key).complete)?.key ?? null
 }

@@ -12,9 +12,17 @@ import {
   buildTurnPrompt,
 } from './prompts'
 import { mergeRefined } from './refineMerge'
-import { MAX_FOLLOWUPS_PER_QUESTION } from './script'
+import { followUpCap } from './script'
 import { parseTurnReply, stripMarkerForDisplay } from './turn'
-import type { AppConfig, ChatMessage, Dimension, InterviewState, WeeklyResult } from './types'
+import type {
+  AppConfig,
+  ChatMessage,
+  Dimension,
+  InterviewContext,
+  InterviewState,
+  TurnAction,
+  WeeklyResult,
+} from './types'
 
 /**
  * 真实模型实现（OpenAI 兼容 /chat/completions）。
@@ -58,11 +66,12 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       dim: Dimension,
       history: ChatMessage[],
       onDelta?: DeltaHandler,
+      ctx?: InterviewContext,
     ): Promise<string> {
       const progress = blockProgress(state, dim)
       const messages = progress.complete
         ? buildClosingPrompt(state, dim, persona)
-        : buildOpeningPrompt(state, dim, history, persona)
+        : buildOpeningPrompt(state, dim, history, persona, ctx)
 
       if (messages.length === 0) return ''
 
@@ -70,7 +79,7 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       const text = stripMarkerForDisplay(raw, true)
       if (text) return text
 
-      // 模型什么都没说也不能让界面空着：退回脚本里的问题
+      // 模型什么都没说也不能让界面空着：退回参考题目里的问题
       return progress.complete ? EMPTY_BLOCK_TAIL : currentQuestion(state, dim) || EMPTY_BLOCK_TAIL
     },
 
@@ -81,7 +90,7 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       onDelta?: DeltaHandler,
     ): Promise<TurnResult> {
       const messages = buildTurnPrompt(state, dim, history, persona)
-      if (messages.length === 0) return { wantsFollowUp: false, message: '' }
+      if (messages.length === 0) return { action: 'next', message: '' }
 
       const raw = await send(messages, false, onDelta)
       const parsed = parseTurnReply(raw)
@@ -90,25 +99,29 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
 
       // 状态机才是追问次数的最终裁判：模型说要追问、但次数已经到顶时按换题处理，
       // 否则「下一句话」和「新状态」会对不上。自由聊没有题目可换，不受这个上限约束。
-      const wantsFollowUp = progress.complete
-        ? parsed.wantsFollowUp
-        : parsed.wantsFollowUp && progress.followUpCount < MAX_FOLLOWUPS_PER_QUESTION
+      const action: TurnAction =
+        !progress.complete && parsed.action === 'followup' && progress.followUpCount >= followUpCap(state.depth)
+          ? 'next'
+          : parsed.action
 
       let message = parsed.message
       if (!message) {
-        // 自由聊时脚本里已经没有下一条题目可退，只能给一句中性的搭话
+        // 自由聊时参考题目已经问完，只能给一句中性的搭话
         if (progress.complete) message = EMPTY_FREE_TAIL
         else {
-          const advanced = nextStep(state, dim, wantsFollowUp)
+          const advanced = nextStep(state, dim, action)
           message = currentQuestion(advanced, dim) || EMPTY_BLOCK_TAIL
         }
       }
 
-      return { wantsFollowUp, message }
+      return { action, message }
     },
 
-    async summarize(history: ChatMessage[]): Promise<WeeklyResult> {
-      const raw = await send(buildSummarizePrompt(history), true)
+    async summarize(
+      history: ChatMessage[],
+      ctx?: InterviewContext,
+    ): Promise<WeeklyResult> {
+      const raw = await send(buildSummarizePrompt(history, ctx), true)
       const outcome = parseResultSafe(raw)
       // 文档要求：解析层必须带容错与降级，不允许崩溃
       return outcome.error ? degradedResult(outcome.error) : outcome.result

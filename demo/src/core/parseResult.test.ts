@@ -40,6 +40,16 @@ describe('模型结果解析', () => {
     expect(r.nextFollowUps).toEqual([])
   })
 
+  it('老模型的输出里没有 state，读回来是四个空串而不是 undefined', () => {
+    const r = parseResult('{"events":["只有这一项"]}')
+    expect(r.state).toEqual({ body: '', mood: '', focus: '', growth: '' })
+  })
+
+  it('state 用中文键名也认得，空的那几项补空串', () => {
+    const r = parseResult('{"状态":{"身体":"睡得还行","情绪":"有点悬"}}')
+    expect(r.state).toEqual({ body: '睡得还行', mood: '有点悬', focus: '', growth: '' })
+  })
+
   it('people 允许是字符串数组', () => {
     const r = parseResult('{"people":["老王","小李"]}')
     expect(r.people).toEqual([

@@ -1,5 +1,18 @@
-/** 采访区块：事情 / 人际 / 物品 / 状态 */
-export type Dimension = 'event' | 'people' | 'thing' | 'mood'
+/**
+ * 采访区块。前四个是内容块（状态 / 事情 / 人际 / 物与钱），
+ * `reconcile`（上周对账）是夹在状态与事情之间的一道单题，只在上周有记录时问。
+ * 顺序就是 `script.ts` 里 `SCRIPT` 的顺序。
+ */
+export type Dimension = 'mood' | 'reconcile' | 'event' | 'people' | 'thing'
+
+/** 复盘深度：深度 / 中度 / 快速，由用户在状态块之后自己挑 */
+export type Depth = 'deep' | 'mid' | 'fast'
+
+/**
+ * 模型这一轮想干什么：接着追（`[追问]`）/ 换下一题（`[换题]`）/
+ * 这块聊够了换下一块（`[换块]`）。
+ */
+export type TurnAction = 'followup' | 'next' | 'block'
 
 export type Role = 'ai' | 'user'
 
@@ -34,14 +47,61 @@ export type BlockProgressMap = Record<Dimension, BlockProgress>
  * 与线性流程的区别：每个区块各记各的进度，用户可以自由选择先聊哪一块。
  */
 export interface InterviewState {
-  /** 当前展开的区块；null 表示回到区块列表 */
+  /** 当前展开的区块；null 表示还没开始 */
   active: Dimension | null
   blocks: BlockProgressMap
+  /**
+   * 复盘深度档位；null 表示状态块还没聊完、用户还没挑。
+   * 挑档位是客户端的三个按钮，不是让模型去猜 —— 确定性才算得清覆盖率。
+   */
+  depth: Depth | null
 }
 
 export interface PersonNote {
   name: string
   note: string
+}
+
+/**
+ * 上一周的结果摘要，只在「上周对账」这一步用。
+ *
+ * 只带两样：下周重点、要跟进的人 —— 对账问的就是这两样落到了哪儿。
+ */
+export interface LastWeekPlan {
+  focus: string[]
+  followUps: string[]
+}
+
+/** 构建提示词时可能要带的上下文 */
+export interface InterviewContext {
+  lastWeek?: LastWeekPlan
+  /** 上一周是哪个周，写进提示词里，模型可以自然地说「上周」 */
+  lastWeekKey?: string
+}
+
+/**
+ * 状态那一段：四项各一句纯文字。
+ *
+ * 刻意**不存分数** —— 打分只有等以后做出趋势页才值钱，
+ * 现在先留着位置：以后加 `scores?: { body?: number; ... }` 即可，旧档补空就行。
+ */
+export interface WeeklyState {
+  /** 身体 */
+  body: string
+  /** 情绪 */
+  mood: string
+  /** 精力 / 专注 */
+  focus: string
+  /** 心智（成长） */
+  growth: string
+}
+
+export function createEmptyState(): WeeklyState {
+  return { body: '', mood: '', focus: '', growth: '' }
+}
+
+export function isStateEmpty(state: WeeklyState): boolean {
+  return !state.body && !state.mood && !state.focus && !state.growth
 }
 
 export interface WeeklyResult {
@@ -59,6 +119,8 @@ export interface WeeklyResult {
   nextFocus: string[]
   /** 下周要跟进的人 */
   nextFollowUps: string[]
+  /** 状态：身体 / 情绪 / 精力 / 心智 各一句 */
+  state: WeeklyState
 }
 
 export function createEmptyResult(): WeeklyResult {
@@ -70,6 +132,7 @@ export function createEmptyResult(): WeeklyResult {
     highlights: [],
     nextFocus: [],
     nextFollowUps: [],
+    state: createEmptyState(),
   }
 }
 

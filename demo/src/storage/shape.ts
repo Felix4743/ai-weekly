@@ -79,7 +79,9 @@ export function normalizeSession(raw: unknown): SavedSession | null {
   const savedAt = Number.isFinite(parsed.savedAt) ? (parsed.savedAt as number) : Date.now()
   return {
     messages: parsed.messages,
-    result: parsed.result,
+    // 过一遍 coerceResult：0.9.1 之前的会话没有「状态」这一栏，这里补成四个空串，
+    // 免得界面读到 undefined 崩掉；正常内容一个字节不动。
+    result: coerceResult(parsed.result) ?? parsed.result,
     savedAt,
     // M7 之前存的会话没有 week：按保存时间推一个，总比算到本周头上强
     week: isWeekKey(parsed.week) ? parsed.week : weekKeyOf(new Date(savedAt)),

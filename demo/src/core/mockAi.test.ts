@@ -224,6 +224,18 @@ describe('演示用假 AI · 一轮回复', () => {
     expect(pieces.join('')).toBe(turn.message)
   })
 
+  it('已经聊完的块里他说「说完了」：回的是收尾，不是「还有呢」', async () => {
+    // 界面拿到同一个 action 就会去开下一块，这里再回一句「还有呢」就自相矛盾了
+    const s = withBlocks({ event: { complete: true, freeTurns: 1 } })
+    const turn = await ai.reply(s, 'event', [
+      msg('ai', '还有别的吗？', 'event'),
+      msg('user', '差不多了，就说完了。', 'event'),
+    ])
+    expect(turn.action).toBe('block')
+    expect(turn.message).not.toContain('还有呢')
+    expect(turn.message).toContain('接着聊聊')
+  })
+
   it('追问次数到顶时，reply 不再追问', async () => {
     const s = withBlocks({
       event: { askIndex: 0, followUpCount: DEFAULT_FOLLOWUP_CAP, complete: false },

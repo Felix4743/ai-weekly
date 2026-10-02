@@ -3,52 +3,61 @@ import {
   blockProgress,
   currentFollowUp,
   currentQuestion,
-  nextIncompleteBlock,
+  nextStage,
   nextStep,
 } from './interview'
-import { MAX_FOLLOWUPS_PER_QUESTION, dimensionLabel } from './script'
+import { SCRIPT, dimensionLabel, followUpCap } from './script'
 import {
   createEmptyResult,
   type ChatMessage,
   type Dimension,
+  type InterviewContext,
   type InterviewState,
   type PersonNote,
+  type TurnAction,
   type WeeklyResult,
+  type WeeklyState,
 } from './types'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 /** 每个区块第一次被打开时的开场语 */
 const OPENERS: Record<Dimension, string> = {
-  event: '周末好。我们花五分钟，把这一周过一遍就好。\n\n先从最实在的开始 —— ',
-  people: '好，说说人。',
-  thing: '再说说东西 —— ',
-  mood: '换个角度。',
+  mood: '周末好。我们花几分钟，把这一周过一遍。\n\n先从状态开始 —— ',
+  reconcile: '对一下上周说好的。',
+  event: '好，说说这周都忙了什么。',
+  people: '再说说人。',
+  thing: '最后说说东西和钱 —— ',
 }
 
 /** 演示用：一键填入的示例回答，让 Demo 可以快速走完 */
 const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
+  mood: [
+    '睡得还行，运动基本没有，吃饭不太规律，中午经常随便对付。',
+    '整体有点闷，最消耗情绪的是方案反复改这件事，一直悬着。',
+    '上午状态最好，能连着干两小时；下午老被会议切开，很难进入状态。',
+    '看了一本讲定价的书，学到一条：先算清成本再谈折扣，下周报价就能用上。',
+  ],
+  reconcile: ['上周说好的报价发出去了，只发了初稿；要跟进的张总一直没约上。'],
   event: [
     '在改客户那个方案，改了三版了还没定下来。',
     '本来想把季度数据整理一下，一直没腾出时间。',
-    '其实主要是开会占了很多时间，真正干活的时间很少。',
-    '客户那边一直没给反馈，只能干等着。',
+    '最关键的一个判断是先不接第二个客户，怕两头都做不细；现在看还是对的。',
+    '临时被拉进一个救火项目，占了整整两天。',
+    '第一次自己动手剪了条短视频，虽然粗糙但挺有意思。',
+    '该做的对账一直没做，因为怕看到数字。',
   ],
   people: [
     '主要是跟老王对接方案，还有跟小李吃了顿饭。',
     '想约张总聊聊明年的方向，但一直没敢开口。',
-    '老王那边一直没拍板，事情就卡在他那儿了。',
-    '好久没联系老同学了，总觉得该问候一下。',
+    '跟供应商那次沟通本可以更好，我当时话说得太急，下次先说我要什么再谈价。',
+    '有一次我越界了，替同事回了客户消息，后来专门去道了个歉。',
   ],
   thing: [
     '买了个新键盘，之前那个手感不行，纠结了半个月终于下单了。',
-    '把旧手机挂二手平台卖掉了，比想象中顺利。',
     '冲动买了个显示器支架，装上一用发现其实用不上。',
-    '没有，这周没顾上这些。',
-  ],
-  mood: [
-    '挺累的，主要就是方案反复改这件事拖着，心里一直不踏实。',
-    '还行，就是有点被会议切得太碎，很难进入状态。',
+    '该续费的云盘和该备份的照片一直拖着没弄。',
+    '这周花了大概两千多，主要是吃饭和交通。',
   ],
 }
 
@@ -60,7 +69,9 @@ export function sampleAnswer(dim: Dimension, index: number): string {
 
 /** 把用户回答按区块归类，供结果生成使用 */
 export function groupAnswers(history: ChatMessage[]): Record<Dimension, string[]> {
-  const out: Record<Dimension, string[]> = { event: [], people: [], thing: [], mood: [] }
+  // 直接照 SCRIPT 建表：以后再加区块，不用回来补这里
+  const out = {} as Record<Dimension, string[]>
+  for (const d of SCRIPT) out[d.key] = []
   for (const m of history) {
     if (m.role !== 'user') continue
     const t = m.text.trim()
@@ -165,7 +176,18 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
     highlights: [...r.highlights],
     nextFocus: [...r.nextFocus],
     nextFollowUps: [...r.nextFollowUps],
+    state: { ...r.state },
   }
+}
+
+/**
+ * 状态四项：状态块的回答按顺序落进 身体 / 情绪 / 精力 / 心智。
+ * 0.9.1 只存文字，不打分（分数与趋势按用户要求留到以后）。
+ */
+function buildState(answers: string[]): WeeklyState {
+  const clean = answers.filter((t) => !isNonAnswer(t))
+  const pick = (i: number) => (clean[i] ? firstSentence(clean[i], 40) : '')
+  return { body: pick(0), mood: pick(1), focus: pick(2), growth: pick(3) }
 }
 
 /** 本周主线：从当前清单里挑出最值得记住的几条 */
@@ -229,6 +251,7 @@ export interface MockAiOptions {
  * 判断要不要追问。
  * 抽成同步纯函数：既给假 AI 用，也让这块判断逻辑可以脱离客户端的异步包装直接测。
  * 真实模型下这个决定由模型自己给（见 turn.ts 的行首标记）。
+ * 上限跟着档位走：快速 1 次、中度 2 次、深度 5 次。
  */
 export function shouldFollowUp(
   userText: string,
@@ -236,7 +259,7 @@ export function shouldFollowUp(
   dim: Dimension,
 ): boolean {
   const p = blockProgress(state, dim)
-  if (p.followUpCount >= MAX_FOLLOWUPS_PER_QUESTION) return false
+  if (p.followUpCount >= followUpCap(state.depth)) return false
   const t = userText.trim()
   if (t.length === 0) return false
   // 「没有」这类回答没什么可追问的，直接换下一题
@@ -245,6 +268,23 @@ export function shouldFollowUp(
   if (t.length < 20) return true
   if (p.followUpCount < 1 && /卡|拖|没|难|烦|累|等/.test(t)) return true
   return false
+}
+
+/** 自由聊里他说「说完了」就收尾换块 */
+const DONE_RE = /说完了|没了|聊完了|先这样|够了|差不多了|就到这/
+
+/**
+ * 假 AI 的行首动作判定，对应真实模型给 `[追问]/[换题]/[换块]`。
+ * 演示里大部分时候靠 `next` 自然走完参考题目，只有自由聊才给 `block`。
+ */
+export function decideAction(
+  userText: string,
+  state: InterviewState,
+  dim: Dimension,
+): TurnAction {
+  const p = blockProgress(state, dim)
+  if (p.complete) return DONE_RE.test(userText.trim()) ? 'block' : 'followup'
+  return shouldFollowUp(userText, state, dim) ? 'followup' : 'next'
 }
 
 /**
@@ -266,11 +306,25 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     return text
   }
 
+  /**
+   * 一块聊完之后的过渡话：该定档了 / 该换下一块了 / 全聊完了。
+   * 分成一个函数是因为「自由聊」和「收尾」两条路都要用它 —— 少一处就少一句自相矛盾的话。
+   */
+  const transitionMessage = (state: InterviewState, dim: Dimension): string => {
+    const stage = nextStage(state)
+    if (stage.kind === 'done') return '四块都聊过了。可以生成你的本周梳理了。'
+    if (stage.kind === 'depth') {
+      return '状态这块聊得差不多了。接下来你想聊到多细 —— 深度复盘（20 分钟）、中度复盘（12 分钟），还是快速复盘（5 分钟）？'
+    }
+    return `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(stage.dim)}」，还是先挑别的？`
+  }
+
   const nextMessage = async (
     state: InterviewState,
     dim: Dimension,
     history: ChatMessage[],
     onDelta?: DeltaHandler,
+    _ctx?: InterviewContext,
   ): Promise<string> => {
     await wait(760)
     const p = blockProgress(state, dim)
@@ -280,12 +334,7 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     if (p.complete) {
       // 自由聊：他还想接着说，就别再催他换块，顺着往下搭一句
       if (p.freeTurns > 0) return streamOut('嗯，还有呢？想到什么说什么。', onDelta)
-      const remaining = nextIncompleteBlock(state)
-      if (!remaining) return streamOut('四块都聊过了。可以生成你的本周梳理了。', onDelta)
-      return streamOut(
-        `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(remaining)}」，还是先挑别的？`,
-        onDelta,
-      )
+      return streamOut(transitionMessage(state, dim), onDelta)
     }
 
     if (p.followUpCount > 0) return streamOut(currentFollowUp(state, dim), onDelta)
@@ -308,16 +357,28 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       await wait(320)
       const answers = history.filter((m) => m.role === 'user' && m.dimension === dim)
       const last = answers.length > 0 ? answers[answers.length - 1].text : ''
-      const wantsFollowUp = shouldFollowUp(last, state, dim)
-      const advanced = nextStep(state, dim, wantsFollowUp)
+      const action = decideAction(last, state, dim)
+      const advanced = nextStep(state, dim, action)
+      // 这一块早就聊完、他又说「说完了」：那是想收尾，不是还想接着说。
+      // 界面按同一个 action 去开下一块，这里就只给一句过渡，别再回「还有呢」。
+      if (blockProgress(state, dim).complete && action === 'block') {
+        await wait(760)
+        return { action, message: await streamOut(transitionMessage(advanced, dim), onDelta) }
+      }
       const message = await nextMessage(advanced, dim, history, onDelta)
-      return { wantsFollowUp, message }
+      return { action, message }
     },
 
-    async summarize(history: ChatMessage[]): Promise<WeeklyResult> {
+    async summarize(history: ChatMessage[], _ctx?: InterviewContext): Promise<WeeklyResult> {
       await wait(1500)
       const byDim = groupAnswers(history)
-      const all = [...byDim.event, ...byDim.people, ...byDim.thing, ...byDim.mood]
+      const all = [
+        ...byDim.event,
+        ...byDim.people,
+        ...byDim.thing,
+        ...byDim.mood,
+        ...byDim.reconcile,
+      ]
       const result = createEmptyResult()
 
       if (all.filter((t) => !isNonAnswer(t)).length === 0) {
@@ -330,12 +391,20 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       result.events = toItems(byDim.event, 4, 50)
       result.people = buildPeople(byDim.people)
       result.things = toItems(byDim.thing, 4)
-      result.pending = toItems(
-        all.filter((t) => PENDING_RE.test(t)),
-        4,
-        40,
-      )
+      // 上周说好的、这周没落地的，写进「未办」并标明来处
+      const fromLastWeek = byDim.reconcile
+        .filter((t) => !isNonAnswer(t) && PENDING_RE.test(t))
+        .map((t) => `上周说好的：${firstSentence(t, 36)}`)
+      result.pending = unique([
+        ...fromLastWeek,
+        ...toItems(
+          all.filter((t) => PENDING_RE.test(t)),
+          4,
+          40,
+        ),
+      ]).slice(0, 4)
 
+      result.state = buildState(byDim.mood)
       result.highlights = buildHighlights(result, byDim)
       result.nextFocus = buildNextFocus(result)
       result.nextFollowUps = buildFollowUps(result)

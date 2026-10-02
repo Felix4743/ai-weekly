@@ -1,4 +1,10 @@
-import { createEmptyResult, type PersonNote, type WeeklyResult } from './types'
+import {
+  createEmptyResult,
+  createEmptyState,
+  type PersonNote,
+  type WeeklyResult,
+  type WeeklyState,
+} from './types'
 
 export interface ParseOutcome {
   result: WeeklyResult
@@ -53,6 +59,22 @@ function toPeople(value: unknown): PersonNote[] {
 }
 
 /**
+ * 状态那一段：四项各一句。
+ *
+ * 容错口径和别处一致 —— 缺项留空、字段名各种叫法都认、模型写成数组也接得住。
+ */
+function toState(value: unknown): WeeklyState {
+  const out = createEmptyState()
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out
+  const o = value as Record<string, unknown>
+  out.body = readString(o.body ?? o.身体 ?? o.physical)
+  out.mood = readString(o.mood ?? o.情绪 ?? o.emotion)
+  out.focus = readString(o.focus ?? o.精力 ?? o.专注 ?? o.energy)
+  out.growth = readString(o.growth ?? o.心智 ?? o.成长 ?? o.learning)
+  return out
+}
+
+/**
  * 把一份**已经是对象**的东西规整成结果结构；不是对象就返回 null。
  *
  * 和 `parseResult` 的区别只在入口：那个负责从模型的一整段文本里挖出 JSON，
@@ -70,6 +92,8 @@ export function coerceResult(raw: unknown): WeeklyResult | null {
     highlights: toStringArray(o.highlights ?? o.本周主线 ?? o.本周热点),
     nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
     nextFollowUps: toStringArray(o.nextFollowUps ?? o.下周跟进),
+    // 0.9.1 之前的档里没有 state：给四个空串，不炸也不冒充有内容
+    state: toState(o.state ?? o.状态),
   }
 }
 

@@ -75,5 +75,12 @@ export function mergeRefined(current: WeeklyResult, fromModel: WeeklyResult): We
     highlights: preferIncoming(current.highlights, fromModel.highlights),
     nextFocus: preferIncoming(current.nextFocus, fromModel.nextFocus),
     nextFollowUps: preferIncoming(current.nextFollowUps, fromModel.nextFollowUps),
+    // 状态是用户手改过的四项文字：只补空缺，不覆盖他写过的
+    state: {
+      body: current.state.body.trim() || fromModel.state.body,
+      mood: current.state.mood.trim() || fromModel.state.mood,
+      focus: current.state.focus.trim() || fromModel.state.focus,
+      growth: current.state.growth.trim() || fromModel.state.growth,
+    },
   }
 }
