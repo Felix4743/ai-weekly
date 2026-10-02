@@ -7,14 +7,17 @@ import {
   updateItem,
   updatePerson,
 } from './resultEdit'
-import type { WeeklyResult } from './types'
+import { createEmptyResult, type WeeklyResult } from './types'
 
 function base(): WeeklyResult {
+  // 从空结果起手再覆盖：以后再加一栏时，这里不用跟着一条条补
   return {
+    ...createEmptyResult(),
     events: ['改方案', '整理数据'],
     people: [{ name: '老王', note: '没拍板' }],
     things: ['换键盘'],
     pending: ['报销没交'],
+    state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
     highlights: ['方案难产'],
     nextFocus: ['定稿', '联系老王', '留整块时间'],
     nextFollowUps: ['老王'],
@@ -85,5 +88,15 @@ describe('结果页编辑操作', () => {
     const next = addItem(r, 'things', '处理旧手机')
     expect(next.things).toEqual(['换键盘', '处理旧手机'])
     expect(next.events).toEqual(r.events)
+  })
+
+  it('清单的增删改都不会碰状态那一栏', () => {
+    const r = base()
+    expect(addItem(r, 'things', '处理旧手机').state).toEqual(r.state)
+    expect(removeItem(r, 'events', 0).state).toEqual(r.state)
+    expect(updateItem(r, 'highlights', 0, '改一句').state).toEqual(r.state)
+    expect(updatePerson(r, 0, { note: '已经拍板了' }).state).toEqual(r.state)
+    expect(removePerson(r, 0).state).toEqual(r.state)
+    expect(addPerson(r, { name: '小李', note: '' }).state).toEqual(r.state)
   })
 })

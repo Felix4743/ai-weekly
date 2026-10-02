@@ -46,6 +46,15 @@ function render(archive: WeekEntry[]) {
   )
 }
 
+/** 从整页 HTML 里切出某一栏那张卡（截到下一栏为止），单看它的先后与徽标 */
+function cardHtml(html: string, key: string, nextKey: string) {
+  const start = html.indexOf(`id="section-${key}"`)
+  const end = html.indexOf(`id="section-${nextKey}"`)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  return html.slice(start, end)
+}
+
 describe('总览页渲染', () => {
   it('一份记录都没有时照常打开，说清楚现在是什么状态', () => {
     const html = render([])
@@ -70,20 +79,23 @@ describe('总览页渲染', () => {
     expect(html).toContain('全部记录')
   })
 
-  it('本周有记录时：详情里就是这一周的全文，四栏照旧默认收起', () => {
+  it('本周有记录时：详情里就是这一周的全文，五栏照旧默认收起', () => {
     const html = render([
       entry(THIS_WEEK, {
         highlights: ['这周基本在补债'],
         events: ['把积压的评审都过了'],
         pending: ['报销还没交'],
+        state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
       }),
     ])
     expect(html).toContain('这周基本在补债')
     expect(html).toContain('事情 1')
-    expect(html).toContain('aria-expanded="false"')
+    // 五栏（含 0.9.1 新增的状态）都是收起态
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(5)
     // 收起态：条目本身不出现在首屏 HTML 里
     expect(html).not.toContain('把积压的评审都过了')
     expect(html).not.toContain('报销还没交')
+    expect(html).not.toContain('睡得还行')
   })
 
   it('本周还没记录时不装作有，给的是「现在聊一聊」', () => {
@@ -125,5 +137,34 @@ describe('总览页渲染', () => {
 
   it('归档为空时不编一个「上次记录」出来', () => {
     expect(render([])).not.toContain('上次记录')
+  })
+})
+
+describe('总览页 · 状态卡（0.9.1 新增）', () => {
+  it('看存档时状态卡也在未办之后、本周主线之前', () => {
+    const html = render([entry(THIS_WEEK, { pending: ['报销还没交'] })])
+    const pending = html.indexOf('id="section-pending"')
+    const state = html.indexOf('id="section-state"')
+    const highlights = html.indexOf('id="section-highlights"')
+    expect(pending).toBeGreaterThanOrEqual(0)
+    expect(pending).toBeLessThan(state)
+    expect(state).toBeLessThan(highlights)
+  })
+
+  it('写了身体和情绪两项，卡上数字是 2', () => {
+    const html = render([
+      entry(THIS_WEEK, {
+        highlights: ['有记录'],
+        state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
+      }),
+    ])
+    expect(html).toContain('状态')
+    expect(cardHtml(html, 'state', 'highlights')).toContain('card-count">2')
+  })
+
+  it('四项都没写时不显示数字，卡片本身照旧在', () => {
+    const html = render([entry(THIS_WEEK, { highlights: ['有记录'] })])
+    expect(cardHtml(html, 'state', 'highlights')).not.toContain('card-count')
+    expect(html).toContain('id="section-state"')
   })
 })

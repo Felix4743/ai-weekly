@@ -10,11 +10,14 @@ import {
 import { createEmptyResult, type WeeklyResult } from './types'
 
 function base(): WeeklyResult {
+  // 从空结果起手再覆盖：以后再加一栏时，这里不用跟着一条条补
   return {
+    ...createEmptyResult(),
     events: ['改方案', '整理数据'],
     people: [{ name: '老王', note: '没拍板' }],
     things: ['换键盘'],
     pending: ['报销没交'],
+    state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
     highlights: ['方案难产'],
     nextFocus: ['定稿', '联系老王', '留整块时间'],
     nextFollowUps: ['老王'],
@@ -22,7 +25,7 @@ function base(): WeeklyResult {
 }
 
 describe('结果页目录', () => {
-  it('按固定顺序列出六块，文案和页面标题一致', () => {
+  it('按固定顺序列出七块，文案和页面标题一致', () => {
     const outline = buildOutline(base())
     expect(outline.map((e) => e.key)).toEqual(SECTION_KEYS)
     expect(outline.map((e) => e.label)).toEqual([
@@ -30,20 +33,50 @@ describe('结果页目录', () => {
       '人际',
       '物品',
       '未办',
+      '状态',
       '本周主线',
       '下周计划',
     ])
   })
 
+  it('状态排在未办之后、本周主线之前', () => {
+    const keys = buildOutline(base()).map((e) => e.key)
+    expect(keys.indexOf('state')).toBeGreaterThan(keys.indexOf('pending'))
+    expect(keys.indexOf('state')).toBeLessThan(keys.indexOf('highlights'))
+  })
+
   it('每一块都带上自己的条数', () => {
     const outline = buildOutline(base())
-    expect(outline.map((e) => e.count)).toEqual([2, 1, 1, 1, 1, 4])
+    expect(outline.map((e) => e.count)).toEqual([2, 1, 1, 1, 2, 1, 4])
   })
 
   it('空结果时条数全是 0，但目录项一个都不少', () => {
     const outline = buildOutline(createEmptyResult())
-    expect(outline).toHaveLength(6)
+    expect(outline).toHaveLength(7)
     expect(outline.every((e) => e.count === 0)).toBe(true)
+  })
+
+  it('状态四项都没写时算 0 条', () => {
+    expect(countSection(createEmptyResult(), 'state')).toBe(0)
+    // 只填了空白也不算写了
+    const blank = createEmptyResult()
+    blank.state = { body: ' ', mood: '\n', focus: '', growth: '   ' }
+    expect(countSection(blank, 'state')).toBe(0)
+  })
+
+  it('状态写了几项就算几条', () => {
+    const r = createEmptyResult()
+    r.state = { body: '睡得还行', mood: '有点烦', focus: '', growth: '' }
+    expect(countSection(r, 'state')).toBe(2)
+    r.state.focus = '上午最好'
+    expect(countSection(r, 'state')).toBe(3)
+  })
+
+  it('状态四项都写了就是 4 条', () => {
+    const r = createEmptyResult()
+    r.state = { body: '睡得还行', mood: '有点烦', focus: '上午最好', growth: '读了半本书' }
+    expect(countSection(r, 'state')).toBe(4)
+    expect(buildOutline(r).find((e) => e.key === 'state')?.count).toBe(4)
   })
 
   it('下周计划把三件重点和要跟进的人一起算', () => {
@@ -60,6 +93,7 @@ describe('结果页目录', () => {
       'section-people',
       'section-things',
       'section-pending',
+      'section-state',
       'section-highlights',
       'section-plan',
     ])

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { WeekEntry } from '../core/archive'
+import { coerceResult } from '../core/parseResult'
 import { defaultPersonaPrompt, PERSONA_PRESETS } from '../core/persona'
-import { createDefaultConfig, type AppConfig } from '../core/types'
+import { createDefaultConfig, createEmptyResult, createEmptyState, type AppConfig } from '../core/types'
 import type { AiWeeklyBridge } from '../shared/ipc'
 import { selectStore } from './index'
 import { createIpcStore } from './ipcStore'
@@ -30,13 +31,11 @@ const GOOD_CONFIG: AppConfig = {
 const GOOD_SESSION: SavedSession = {
   messages: [{ id: 'm1', role: 'user', text: '这周很忙', dimension: 'event', at: 1 }],
   result: {
+    // 从空结果起手再覆盖：以后再加一栏时，这里不用跟着一条条补
+    ...createEmptyResult(),
     events: ['改了三版方案'],
-    people: [],
-    things: [],
-    pending: [],
     highlights: ['方案定了'],
     nextFocus: ['把报价发出去'],
-    nextFollowUps: [],
   },
   savedAt: 123,
   week: '2026-09-21',
@@ -190,6 +189,100 @@ describe('存储 · 形状归一化', () => {
 
     it('归档文件还不存在时返回空数组，总览页照常打得开', () => {
       expect(normalizeArchive(undefined)).toEqual([])
+    })
+  })
+
+  describe('旧档（0.9.1 之前的结果还没有状态那一栏）', () => {
+    const LEGACY_RESULT = {
+      events: ['改了三版方案'],
+      people: [{ name: '老王', note: '没拍板' }],
+      things: ['想换键盘'],
+      pending: ['报销没交'],
+      highlights: ['方案定了'],
+      nextFocus: ['把报价发出去'],
+      nextFollowUps: ['老王'],
+    }
+
+    it('会话读回来时状态补成四个空串，别的内容一字不动', () => {
+      const session = normalizeSession({ messages: [], result: LEGACY_RESULT, savedAt: 1 })
+      expect(session?.result.state).toEqual({ body: '', mood: '', focus: '', growth: '' })
+      expect(session?.result).toMatchObject(LEGACY_RESULT)
+    })
+
+    it('周归档读回来时同样补四个空串，历史条目不会因为缺一栏被丢掉', () => {
+      const list = normalizeArchive([{ week: '2026-09-21', savedAt: 1, result: LEGACY_RESULT }])
+      expect(list).toHaveLength(1)
+      expect(list[0].result.state).toEqual({ body: '', mood: '', focus: '', growth: '' })
+      expect(list[0].result).toMatchObject(LEGACY_RESULT)
+    })
+  })
+
+  describe('状态那一栏的容错（coerceResult）', () => {
+    const stateOf = (raw: unknown) => coerceResult(raw)?.state
+
+    it('中文键和英文别名都认，没写的项留空', () => {
+      expect(
+        stateOf({
+          状态: { 身体: '睡得还行', 情绪: '有点烦', 精力: '上午最好', 心智: '读了半本书' },
+        }),
+      ).toEqual({ body: '睡得还行', mood: '有点烦', focus: '上午最好', growth: '读了半本书' })
+
+      expect(
+        stateOf({
+          state: {
+            physical: '腰不疼了',
+            emotion: '挺平静',
+            energy: '下午犯困',
+            learning: '看完了两章',
+          },
+        }),
+      ).toEqual({ body: '腰不疼了', mood: '挺平静', focus: '下午犯困', growth: '看完了两章' })
+
+      // 专注和成长是 0.9.1 才有的说法，照样接得住
+      expect(stateOf({ state: { 专注: '早晨最清醒', 成长: '学会拒绝' } })).toEqual({
+        body: '',
+        mood: '',
+        focus: '早晨最清醒',
+        growth: '学会拒绝',
+      })
+    })
+
+    it('脏值不往外抛：数字和布尔转成文字，别的当没写', () => {
+      expect(stateOf({ state: { body: 42, mood: true, focus: null, growth: ['数组'] } })).toEqual({
+        body: '42',
+        mood: 'true',
+        focus: '',
+        growth: '',
+      })
+      expect(stateOf({ state: { body: '  睡够了  ' } })).toEqual({
+        body: '睡够了',
+        mood: '',
+        focus: '',
+        growth: '',
+      })
+      // 模型偶尔会把一句话写成对象，取出里面的文字
+      expect(stateOf({ state: { mood: { text: '心里踏实' } } })).toEqual({
+        body: '',
+        mood: '心里踏实',
+        focus: '',
+        growth: '',
+      })
+    })
+
+    it('整个状态不是对象时当没写，四项全空，界面不炸', () => {
+      const empty = createEmptyState()
+      expect(stateOf({ state: '睡得还行' })).toEqual(empty)
+      expect(stateOf({ state: [] })).toEqual(empty)
+      expect(stateOf({ state: null })).toEqual(empty)
+      expect(stateOf({ state: 0 })).toEqual(empty)
+      expect(stateOf({})).toEqual(empty)
+      expect(stateOf({ 状态: '挺好的' })).toEqual(empty)
+    })
+
+    it('结果本身不是对象时仍是 null，调用方照旧能判空', () => {
+      expect(coerceResult(null)).toBeNull()
+      expect(coerceResult('一段文字')).toBeNull()
+      expect(coerceResult([])).toBeNull()
     })
   })
 })

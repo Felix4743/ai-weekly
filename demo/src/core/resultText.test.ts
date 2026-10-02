@@ -1,26 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { resultToMarkdown } from './resultText'
-import type { WeeklyResult } from './types'
+import { createEmptyResult, type WeeklyResult } from './types'
 
 const FULL: WeeklyResult = {
+  // 从空结果起手再覆盖：以后再加一栏时，这里不用跟着一条条补
+  ...createEmptyResult(),
   events: ['改了三版方案，还没定'],
   people: [{ name: '老王', note: '方案卡在他那儿没拍板' }],
   things: ['想换键盘，挑了半个月没定'],
   pending: ['报销拖了两周没交'],
+  state: { body: '睡得还行', mood: '这周一直悬着', focus: '上午最好', growth: '读了半本书' },
   highlights: ['方案难产是这周主线'],
   nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
   nextFollowUps: ['老王'],
 }
 
-const EMPTY: WeeklyResult = {
-  events: [],
-  people: [],
-  things: [],
-  pending: [],
-  highlights: [],
-  nextFocus: [],
-  nextFollowUps: [],
-}
+const EMPTY: WeeklyResult = createEmptyResult()
 
 describe('结果导出为 Markdown', () => {
   it('包含全部章节标题', () => {
