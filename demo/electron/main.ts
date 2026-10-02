@@ -70,12 +70,9 @@ function wireIpc(): void {
   ipcMain.handle(IPC.llmSend, (_event, payload: LlmSendPayload) => llm.handle(payload))
   ipcMain.on(IPC.llmAbort, (_event, requestId: string) => llm.abort(requestId))
 
-  // 读用 sendSync：首屏要在第一次渲染之前就知道该进设置页还是对话页
+  // 读用 sendSync：总览页要一进去就画得出来
   ipcMain.on(IPC.loadConfig, (event) => {
     event.returnValue = store.loadConfig()
-  })
-  ipcMain.on(IPC.loadSession, (event) => {
-    event.returnValue = store.loadSession()
   })
   ipcMain.on(IPC.loadArchive, (event) => {
     event.returnValue = store.loadArchive()
@@ -83,8 +80,6 @@ function wireIpc(): void {
 
   // 写不需要回执，不阻塞界面
   ipcMain.on(IPC.saveConfig, (_event, config: unknown) => store.saveConfig(config))
-  ipcMain.on(IPC.saveSession, (_event, session: unknown) => store.saveSession(session))
-  ipcMain.on(IPC.clearSession, () => store.clearSession())
   ipcMain.on(IPC.saveArchive, (_event, list: unknown) => store.saveArchive(list))
 }
 

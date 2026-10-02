@@ -38,9 +38,6 @@ function fakeBridge(
       store: {
         loadConfig: () => null,
         saveConfig: () => {},
-        loadSession: () => null,
-        saveSession: () => {},
-        clearSession: () => {},
         loadArchive: () => null,
         saveArchive: () => {},
       },

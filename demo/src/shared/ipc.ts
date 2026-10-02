@@ -18,9 +18,6 @@ export const IPC = {
   llmAbort: 'llm:abort',
   loadConfig: 'store:load-config',
   saveConfig: 'store:save-config',
-  loadSession: 'store:load-session',
-  saveSession: 'store:save-session',
-  clearSession: 'store:clear-session',
   loadArchive: 'store:load-archive',
   saveArchive: 'store:save-archive',
 } as const
@@ -56,13 +53,10 @@ export interface AiWeeklyBridge {
     abort(requestId: string): void
   }
   store: {
-    /** 同步读：首屏要在第一次渲染前就决定进设置页还是对话页 */
+    /** 同步读：总览页要一进去就画得出来 */
     loadConfig(): unknown
     saveConfig(config: unknown): void
-    loadSession(): unknown
-    saveSession(session: unknown): void
-    clearSession(): void
-    /** 按周归档的结果；同样同步读，总览页要一进去就画得出来 */
+    /** 按周归档；同样同步读 */
     loadArchive(): unknown
     saveArchive(list: unknown): void
   }

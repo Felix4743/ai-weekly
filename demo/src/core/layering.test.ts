@@ -41,9 +41,10 @@ describe('分层约束 · core 保持纯净', () => {
   it('先确认真的读到了文件，别让这组测试空跑成假绿', () => {
     const names = CORE.map((s) => s.name)
     expect(CORE.length).toBeGreaterThan(8)
-    expect(names).toContain('interview.ts')
     expect(names).toContain('prompts.ts')
     expect(names).toContain('openAiClient.ts')
+    expect(names).toContain('mockAi.ts')
+    expect(names).toContain('review.ts')
   })
 
   it('core/ 里不出现 React', () => {

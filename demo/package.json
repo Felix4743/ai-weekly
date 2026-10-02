@@ -1,10 +1,10 @@
 {
   "name": "ai-weekly",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.9.0",
   "type": "module",
   "main": "dist-electron/main.cjs",
-  "description": "AI 周报 —— 采访式个人周复盘工具",
+  "description": "AI 周报 —— 写一段流水账，AI 帮你复盘这一周",
   "author": "AI 周报",
   "scripts": {
     "dev": "vite",

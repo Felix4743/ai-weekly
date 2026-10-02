@@ -16,7 +16,7 @@
 ## 回看旧版本：用 tag，不要用文件夹
 
 ```powershell
-git tag --list 'mvp*'                  # 有哪些：mvp-v0.5 / mvp-v0.6 / mvp-v0.8 / mvp-v0.8.1
+git tag --list 'mvp*'                  # 有哪些：mvp-v0.5 / mvp-v0.6 / mvp-v0.8 / mvp-v0.8.1 / mvp-v0.9
 git log --oneline --decorate           # 哪个提交是哪个 tag
 
 git show mvp-v0.8:demo/package.json    # 只看一个文件，不用切
@@ -68,5 +68,6 @@ tag 是权威版本：能 checkout、能 diff、能回滚。**不再往本目录
 它同样不进版本库（`mvp/*` 默认整块忽略就是为这个）—— 里面是几百 MB 的 Electron 运行时。
 
 升级它：跑一次新的安装包，安装路径仍旧选 `mvp\ai-weekly`，NSIS 会就地覆盖成新版本。
-**配置、会话与周归档都不在这个目录里**，它们在 `%APPDATA%\ai-weekly\`（`config.json` /
-`session.json` / `weeks.json`），升级不会碰它们。
+**配置与周归档都不在这个目录里**，它们在 `%APPDATA%\ai-weekly\`（`config.json` /
+`weeks.json`），升级不会碰它们。0.9.0 起不再有 `session.json` —— 采访流那套整条链路撤掉了，
+旧的那份留在原处、不再读写（也不用删，它不会再变大）。

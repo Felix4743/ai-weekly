@@ -1,309 +1,232 @@
 import { describe, expect, it } from 'vitest'
 import { AiError } from './aiError'
+import type { ReviewRequest } from './aiClient'
 import type { ChatRequest, ChatTransport } from './chatTransport'
-import { createInterview, openBlock } from './interview'
 import { createOpenAiClient } from './openAiClient'
-import { MAX_FOLLOWUPS_PER_QUESTION, SCRIPT } from './script'
-import { createEmptyResult, type AppConfig, type ChatMessage, type Dimension, type WeeklyResult } from './types'
-
-const PERSONA = '你是一个测试人设：说话像老同事，不爱客套。'
-
-const CONFIG: AppConfig = {
-  apiKey: 'sk-test',
-  baseUrl: 'https://api.example.com/v1',
-  model: 'test-model',
-  persona: { prompt: PERSONA, preset: 'custom' },
-}
+import { isDegradedReview } from './review'
 
 /**
- * 按剧本回答的假传输层：既能断言「到底发了什么出去」，
- * 也能模拟流式吐字与网络失败，整个测试不碰网络。
+ * 真模型这一侧的读法测试。
+ *
+ * 这里不联网：`ChatTransport` 就是个接口，我们自己塞一个假的进去，
+ * 于是「怎么发请求」「模型乱答时怎么办」「没配好配置时怎么办」都能当场复现。
+ * 三条底线：请求要带全配置；模型乱来**不许抛**，只降级；配置没填**要抛**，且话说得能看懂。
  */
-function scriptedTransport(script: Array<string | Error>) {
-  const seen: ChatRequest[] = []
+
+const CONFIG = {
+  apiKey: 'sk-test',
+  baseUrl: 'https://example.test/v1',
+  model: 'test-model',
+}
+
+const NOTES = '这周主要在改客户方案。\n下周把报价单发出去。'
+
+function req(patch: Partial<ReviewRequest> = {}): ReviewRequest {
+  return {
+    week: '2026-09-21',
+    weekText: '9月21日 – 9月27日',
+    notes: NOTES,
+    previous: null,
+    isFollowUp: false,
+    ...patch,
+  }
+}
+
+/** 一台假 transport：记下每次请求，按你给的脚本回答（或按你给的错炸掉） */
+function fakeTransport(script: { raw?: string; fail?: Error } = {}) {
+  const calls: ChatRequest[] = []
   const transport: ChatTransport = {
-    async send(req, onDelta) {
-      seen.push(req)
-      const next = script.shift()
-      if (next instanceof Error) throw next
-      const text = next ?? ''
-      if (onDelta) for (const ch of text) onDelta(ch)
-      return text
+    send: async (request) => {
+      calls.push(request)
+      if (script.fail) throw script.fail
+      return script.raw ?? ''
     },
   }
-  return { transport, seen }
+  return { calls, transport }
 }
 
-let seq = 0
-function msg(role: 'ai' | 'user', text: string, dimension: Dimension): ChatMessage {
-  seq += 1
-  return { id: `m${seq}`, role, text, dimension, at: seq }
-}
-
-const HISTORY = [
-  msg('ai', '这周主要忙了些什么？', 'event'),
-  msg('user', '在改客户那个方案，改了三版还没定', 'event'),
-]
-
-function withFollowUps(count: number) {
-  const base = createInterview()
-  return {
-    active: 'event' as const,
-    blocks: {
-      ...base.blocks,
-      event: { askIndex: 0, followUpCount: count, complete: false, freeTurns: 0 },
-    },
-  }
-}
-
-/** 这一块的主问题已经问完，用户还想接着说 */
-function inFreeChat(freeTurns = 1) {
-  const base = createInterview()
-  return {
-    active: 'event' as const,
-    blocks: { ...base.blocks, event: { ...base.blocks.event, complete: true, freeTurns } },
-  }
-}
-
-describe('真实模型客户端 · 一轮回复', () => {
-  it('读出 [追问] 标记，并且不把标记带进正文', async () => {
-    const { transport } = scriptedTransport(['[追问]\n这件事哪一部分最花时间？'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(true)
-    expect(turn.message).toBe('这件事哪一部分最花时间？')
-  })
-
-  it('[换题] 时不追问', async () => {
-    const { transport } = scriptedTransport(['[换题]那有没有本来打算做、结果没做成的事？'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
-    expect(turn.message).toContain('本来打算做')
-  })
-
-  it('状态机才是追问次数的最终裁判：模型想追问但已到上限，按换题处理', async () => {
-    const { transport } = scriptedTransport(['[追问]\n再问一句'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(withFollowUps(MAX_FOLLOWUPS_PER_QUESTION), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
-  })
-
-  it('模型没给标记时按换题处理，保证四个区块都被覆盖', async () => {
-    const { transport } = scriptedTransport(['那后来呢？'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(false)
-    expect(turn.message).toBe('那后来呢？')
-  })
-
-  it('模型一句话都没说时退回脚本问题，界面不会留空气泡', async () => {
-    const { transport } = scriptedTransport(['[追问]\n   '])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-    expect(turn.message.trim().length).toBeGreaterThan(0)
-  })
-
-  it('一次请求就够了：带上模型名、完整对话与进度信息', async () => {
-    const { transport, seen } = scriptedTransport(['[换题]下一题'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
-
-    expect(seen).toHaveLength(1)
-    expect(seen[0].model).toBe('test-model')
-    expect(seen[0].baseUrl).toBe('https://api.example.com/v1')
-    expect(seen[0].json).toBeFalsy()
-
-    const payload = JSON.stringify(seen[0].messages)
-    expect(payload).toContain('这周主要忙了些什么')
-    expect(payload).toContain('本题已追问 0 次')
-    expect(payload).toContain('在改客户那个方案')
-  })
-
-  it('流式增量会原样转发给上层', async () => {
-    const { transport } = scriptedTransport(['[换题]好'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const pieces: string[] = []
-    await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY, (d) => pieces.push(d))
-    expect(pieces.join('')).toBe('[换题]好')
-  })
+/** 模型正常回答时的样子 */
+const GOOD_JSON = JSON.stringify({
+  headline: '改稿占了主要精力，进度被卡住了。',
+  did: ['改客户方案', '开了两次评审会'],
+  issues: [{ text: '方案拖着没拍板', advice: ['先把两个选项写出来让客户选'], key: '拖延' }],
+  reconcile: [],
+  plan: [{ text: '把报价单发给客户', when: '下周' }],
+  nudge: '没写钱，这周有花得值或者后悔的吗？',
+  reply: '',
 })
 
-describe('真实模型客户端 · 专属采访者', () => {
-  it('用户写的人设原样进了请求，机器约定跟在后面', async () => {
-    const { transport, seen } = scriptedTransport(['[换题]下一题'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+describe('真模型客户端 · 怎么发请求', () => {
+  it('一条 system 加一条 user，带 json 与配置里的地址、Key、模型', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
 
-    const system = seen[0].messages.find((m) => m.role === 'system')?.content ?? ''
-    expect(system).toContain(PERSONA)
-    expect(system).toContain('[追问]')
-    expect(system).toContain('一次只问一件事')
+    await client.analyze(req())
+
+    expect(fake.calls).toHaveLength(1)
+    const call = fake.calls[0]
+    expect(call.messages.map((m) => m.role)).toEqual(['system', 'user'])
+    expect(call.messages[0].content).toContain('周复盘')
+    expect(call.messages[1].content).toContain('这周主要在改客户方案')
+    expect(call.json).toBe(true)
+    expect(call.baseUrl).toBe(CONFIG.baseUrl)
+    expect(call.apiKey).toBe(CONFIG.apiKey)
+    expect(call.model).toBe(CONFIG.model)
   })
 
-  it('换一段人设就换一套口气，不用重启应用', async () => {
-    const { transport, seen } = scriptedTransport(['[换题]一', '[换题]二'])
-    const first = createOpenAiClient({
-      transport,
-      config: { ...CONFIG, persona: { prompt: 'A 人设', preset: 'custom' } },
+  it('留白也当没填：配置前后有空格照样能发出去', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({
+      transport: fake.transport,
+      config: { apiKey: '  sk-test  ', baseUrl: ' https://example.test/v1 ', model: ' test-model ' },
     })
-    await first.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
 
-    const second = createOpenAiClient({
-      transport,
-      config: { ...CONFIG, persona: { prompt: 'B 人设', preset: 'custom' } },
+    await client.analyze(req())
+
+    expect(fake.calls[0].apiKey).toBe('sk-test')
+    expect(fake.calls[0].baseUrl).toBe('https://example.test/v1')
+    expect(fake.calls[0].model).toBe('test-model')
+  })
+
+  it('转发流式增量：模型吐一段就交一段出去', async () => {
+    const seen: string[] = []
+    const transport: ChatTransport = {
+      send: async (_request, onDelta) => {
+        onDelta?.('{"headline":"改稿')
+        onDelta?.('占了主要精力。","did":[]}')
+        return '{"headline":"改稿占了主要精力。","did":[]}'
+      },
+    }
+    const client = createOpenAiClient({ transport, config: CONFIG })
+
+    await client.analyze(req(), (delta) => seen.push(delta))
+
+    expect(seen.join('')).toContain('改稿')
+    expect(seen).toHaveLength(2)
+  })
+})
+
+describe('真模型客户端 · 正常回答', () => {
+  it('模型给了完整 JSON，就得到一份五段复盘', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
+
+    const { review, reply } = await client.analyze(req())
+
+    expect(isDegradedReview(review)).toBe(false)
+    expect(review.headline).toBe('改稿占了主要精力，进度被卡住了。')
+    expect(review.did).toEqual(['改客户方案', '开了两次评审会'])
+    expect(review.issues[0].key).toBe('拖延')
+    expect(review.issues[0].advice).toEqual(['先把两个选项写出来让客户选'])
+    expect(review.plan[0].when).toBe('下周')
+    expect(reply).toBe('')
+  })
+
+  it('模型回了 reply 就原样带到结果里', async () => {
+    const fake = fakeTransport({
+      raw: JSON.stringify({ headline: '补完之后的样子。', reply: '好，把这段并进去了。' }),
     })
-    await second.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
 
-    expect(JSON.stringify(seen[0].messages)).toContain('A 人设')
-    expect(JSON.stringify(seen[1].messages)).toContain('B 人设')
+    const { review, reply } = await client.analyze(req({ isFollowUp: true }))
+
+    expect(reply).toBe('好，把这段并进去了。')
+    // reply 是外壳字段，不该混进五段正文里
+    expect(review.headline).toBe('补完之后的样子。')
   })
 
-  it('主问题聊完之后还能追：自由聊不受追问上限约束', async () => {
-    const { transport } = scriptedTransport(['[追问]\n那这件事后来呢？'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
-    expect(turn.wantsFollowUp).toBe(true)
-    expect(turn.message).toBe('那这件事后来呢？')
+  it('模型把 JSON 包在 ```json 围栏里也认得出', async () => {
+    const fake = fakeTransport({ raw: '```json\n' + GOOD_JSON + '\n```' })
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
+
+    const { review } = await client.analyze(req())
+
+    expect(isDegradedReview(review)).toBe(false)
+    expect(review.headline).toBe('改稿占了主要精力，进度被卡住了。')
   })
 
-  it('自由聊时模型不说话，也不会把最后一道旧题再念一遍', async () => {
-    const { transport } = scriptedTransport(['[追问]\n   '])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
-    const lastQuestion = SCRIPT[0].mainQuestions[SCRIPT[0].mainQuestions.length - 1]
-    expect(turn.message).not.toContain(lastQuestion)
-    expect(turn.message.trim().length).toBeGreaterThan(0)
-  })
-})
+  it('JSON 前后有废话时，只挑中间那段', async () => {
+    const fake = fakeTransport({
+      raw: `好的，我先说明一下思路：\n${GOOD_JSON}\n希望这份复盘对你有帮助。`,
+    })
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
 
-describe('真实模型客户端 · 区块开场', () => {
-  it('开场白也会摘掉可能冒出来的标记', async () => {
-    const { transport } = scriptedTransport(['[换题]这周买了什么？'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    expect(await ai.nextMessage(openBlock(createInterview(), 'thing'), 'thing', [])).toBe(
-      '这周买了什么？',
-    )
-  })
+    const { review } = await client.analyze(req())
 
-  it('模型返回空白时退回脚本里的问题', async () => {
-    const { transport } = scriptedTransport(['   '])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    expect(await ai.nextMessage(openBlock(createInterview(), 'thing'), 'thing', [])).toContain(
-      '这周买了什么',
-    )
+    expect(isDegradedReview(review)).toBe(false)
+    expect(review.did).toEqual(['改客户方案', '开了两次评审会'])
   })
 })
 
-describe('真实模型客户端 · 生成结果', () => {
-  const GOOD = JSON.stringify({
-    events: ['改了三版方案'],
-    people: [{ name: '老王', note: '一直没拍板' }],
-    things: ['买了个键盘'],
-    pending: ['报销拖了两周没交'],
-    highlights: ['方案难产是这周主线'],
-    nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
-    nextFollowUps: ['老王'],
-  })
+describe('真模型客户端 · 模型乱答时不抛，只降级', () => {
+  async function expectDegraded(raw: string) {
+    const fake = fakeTransport({ raw })
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
 
-  it('解析模型返回的 JSON', async () => {
-    const { transport } = scriptedTransport([GOOD])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const r = await ai.summarize([msg('user', '在改方案', 'event')])
-    expect(r.events).toEqual(['改了三版方案'])
-    expect(r.people[0].name).toBe('老王')
-    expect(r.nextFocus).toHaveLength(3)
-  })
+    const { review } = await client.analyze(req())
 
-  it('生成时要求 JSON 模式', async () => {
-    const { transport, seen } = scriptedTransport([GOOD])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await ai.summarize([])
-    expect(seen[0].json).toBe(true)
-  })
-
-  it('模型返回一坨垃圾时降级不崩，并说明原因', async () => {
-    const { transport } = scriptedTransport(['完全不是 JSON'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const r = await ai.summarize([msg('user', '在改方案', 'event')])
-    expect(r.events).toEqual([])
-    expect(r.highlights.join(' ')).toContain('没能整理成功')
-    expect(r.nextFocus.length).toBeGreaterThan(0)
-  })
-
-  it('网络层报错时照实往上抛，不伪装成结果', async () => {
-    const { transport } = scriptedTransport([new AiError('API Key 不对')])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await expect(ai.summarize([])).rejects.toThrow('API Key 不对')
-  })
-})
-
-describe('真实模型客户端 · 重新整理', () => {
-  const CURRENT: WeeklyResult = {
-    ...createEmptyResult(),
-    events: ['我手改的那一条'],
-    people: [{ name: '老王', note: '我写的备注' }],
-    highlights: ['旧热点'],
-    nextFocus: ['旧重点'],
-    nextFollowUps: ['老王'],
+    expect(isDegradedReview(review)).toBe(true)
+    expect(review.headline.startsWith('这次没能整理成功：')).toBe(true)
+    expect(review.headline.length).toBeGreaterThan('这次没能整理成功：'.length)
+    expect(review.nudge).toContain('重新复盘')
+    return review
   }
 
-  it('模型想改用户手改的清单也改不掉', async () => {
-    const modelSays = JSON.stringify({
-      events: ['模型自己编的'],
-      people: [{ name: '老王', note: '模型改的备注' }],
-      things: [],
-      pending: [],
-      highlights: ['新热点'],
-      nextFocus: ['新重点'],
-      nextFollowUps: ['小李'],
+  it('回了空串时降级，还能再点一次重新复盘', async () => {
+    await expectDegraded('')
+  })
+
+  it('回了坏 JSON 时降级', async () => {
+    await expectDegraded('{"headline": "没写完就断了')
+  })
+
+  it('回了一大段没有 JSON 的话时降级', async () => {
+    await expectDegraded('这周你挺不容易的，先歇一会儿吧。')
+  })
+
+  it('传输层说人话地失败了（断网、超时、401），就把那句人话交给界面', async () => {
+    // 真实的两条传输层实现都会把网络失败包成 AiError 再往上抛
+    // （见 browserTransport.ts:71「连不上接口地址…」、ipcTransport.ts:44），
+    // 所以这里模拟的是它们真正的行为。
+    const fake = fakeTransport({
+      fail: new AiError('连不上接口地址，检查一下网络和「接口地址」填得对不对', 'fetch failed'),
     })
-    const { transport } = scriptedTransport([modelSays])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    const r = await ai.refine([], CURRENT, '下周必须把报价发出去')
+    const client = createOpenAiClient({ transport: fake.transport, config: CONFIG })
 
-    expect(r.events).toEqual(['我手改的那一条', '模型自己编的'])
-    expect(r.people[0].note).toBe('我写的备注')
-    expect(r.highlights).toEqual(['新热点'])
-    expect(r.nextFocus).toEqual(['新重点'])
-    expect(r.nextFollowUps).toEqual(['小李'])
-  })
-
-  it('把补充说明和当前结果一起发给模型', async () => {
-    const { transport, seen } = scriptedTransport([JSON.stringify({ highlights: ['新'] })])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await ai.refine([], CURRENT, '下周必须把报价发出去')
-    const payload = JSON.stringify(seen[0].messages)
-    expect(payload).toContain('下周必须把报价发出去')
-    expect(payload).toContain('我手改的那一条')
-  })
-
-  it('解析不了就抛错，用户当前的结果原地不动', async () => {
-    const { transport } = scriptedTransport(['不是 JSON'])
-    const ai = createOpenAiClient({ transport, config: CONFIG })
-    await expect(ai.refine([], CURRENT, '补充')).rejects.toThrow('再试一次')
+    await expect(client.analyze(req())).rejects.toThrow('连不上接口地址')
+    expect(fake.calls).toHaveLength(1)
   })
 })
 
-describe('真实模型客户端 · 配置校验', () => {
-  it('没填 Key 就直接报错，一个请求都不发', async () => {
-    const { transport, seen } = scriptedTransport(['x'])
-    const ai = createOpenAiClient({ transport, config: { ...CONFIG, apiKey: '  ' } })
-    await expect(ai.summarize([])).rejects.toThrow('API Key')
-    expect(seen).toHaveLength(0)
+describe('真模型客户端 · 配置没填就明说', () => {
+  it('没填 API Key 时抛那句中文，也不去打扰网络', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: { ...CONFIG, apiKey: '   ' } })
+
+    await expect(client.analyze(req())).rejects.toThrow('还没有填 API Key')
+    expect(fake.calls).toHaveLength(0)
   })
 
-  it('没填模型名就直接报错', async () => {
-    const { transport, seen } = scriptedTransport(['x'])
-    const ai = createOpenAiClient({ transport, config: { ...CONFIG, model: '' } })
-    await expect(ai.summarize([])).rejects.toThrow('模型名')
-    expect(seen).toHaveLength(0)
+  it('没填接口地址时抛那句中文', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: { ...CONFIG, baseUrl: '' } })
+
+    await expect(client.analyze(req())).rejects.toThrow('还没有填接口地址')
+    expect(fake.calls).toHaveLength(0)
   })
 
-  it('没填接口地址就直接报错', async () => {
-    const { transport, seen } = scriptedTransport(['x'])
-    const ai = createOpenAiClient({ transport, config: { ...CONFIG, baseUrl: '' } })
-    await expect(ai.summarize([])).rejects.toThrow('接口地址')
-    expect(seen).toHaveLength(0)
+  it('没填模型名时抛那句中文', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: { ...CONFIG, model: '' } })
+
+    await expect(client.analyze(req())).rejects.toThrow('还没有填模型名')
+    expect(fake.calls).toHaveLength(0)
+  })
+
+  it('抛出来的是 AiError，界面才分得清「是配置问题」还是别的', async () => {
+    const fake = fakeTransport({ raw: GOOD_JSON })
+    const client = createOpenAiClient({ transport: fake.transport, config: { ...CONFIG, apiKey: '' } })
+
+    await expect(client.analyze(req())).rejects.toBeInstanceOf(AiError)
   })
 })

@@ -1,29 +1,46 @@
-import { type WeeklyResult } from './types'
+import { repeatCount as countKeys, type PreviousWeek, type Review } from './review'
 import {
   addWeeks,
   relationLabel,
   weekKeyOf,
+  weekRangeText,
   weekRelation,
   type WeekKey,
   type WeekRelation,
 } from './week'
 
 /**
- * 按周归档：每一周的结果各存一份，键是那一周的周一。
+ * 按周归档：每一周各存一份，键是那一周的周一。
  *
- * 存在的理由是产品上的：`session.json` 只留得住「最近一次」，而「上周到底在忙什么」
- * 恰恰是做周复盘时最想知道的东西 —— 没有地方留它，日历就永远是空的。
+ * 0.9.0 起一条记录由两部分组成：**用户写的那段原文（notes）**和
+ * **AI 复盘的结果（review）**。这两样分开存是有意的：
+ * - 复盘是 AI 说的，可以一键重来；原文是你写的，重来一次不该逼你重写一遍
+ * - review 为 null 表示「这一周只写了原文，还没复盘」，这是合法状态，
+ *   日历上照常有它，点进去就能接着做
  *
- * 这里全是纯函数，读写交给 storage/。所以「同一周改十遍只留一份」「旧的一周
- * 改完存回原来那一周」这些规则不用起界面就能测。
+ * 这里全是纯函数，读写交给 storage/。所以「同一周改十遍只留一份」
+ * 「旧的一周改完存回原来那一周」这些规则不用起界面就能测。
  */
 
 export interface WeekEntry {
   /** 那一周的周一，`YYYY-MM-DD` */
   week: WeekKey
-  /** 最后一次写入这个时刻 */
+  /** 最后一次写入这个时刻（改原文、重做复盘都算） */
   savedAt: number
-  result: WeeklyResult
+  /** 用户自己写的那一段原文 */
+  notes: string
+  /** AI 复盘的结果；null = 只写了原文，还没复盘 */
+  review: Review | null
+  /**
+   * 用户在这一周里**亲手删掉**的条目文本。
+   *
+   * 为什么得存下来：重新复盘是拿最新的原文整份重来，模型很可能又把用户
+   * 删掉的那条推出来。合并的那一刻只有「用户现在这份」和「模型这份」，
+   * 看不出少过什么 —— 不把「删过什么」记在归档里，删除就会被下一次
+   * 重新整理悄悄冲掉，产品承诺的「你改过的清单要留住」也就断了。
+   * 空数组或没有这个字段都表示「这一周没删过东西」。
+   */
+  dropped?: string[]
 }
 
 /**
@@ -48,77 +65,135 @@ function trim(list: WeekEntry[]): WeekEntry[] {
   return sortEntries(list).slice(0, ARCHIVE_LIMIT)
 }
 
-/** 同一周只留一份：后来的覆盖先前的 */
-export function upsertWeek(list: WeekEntry[], entry: WeekEntry): WeekEntry[] {
-  return trim([...list.filter((e) => e.week !== entry.week), entry])
+/**
+ * 什么都不值得留的条目：没写原文、也没有复盘。
+ *
+ * 这种条目是**误点**留下的（打开这一周、一个字没写就退了），
+ * 留着只会让日历上多一个点不明白的空格子。
+ */
+export function isEmptyEntry(entry: WeekEntry): boolean {
+  return entry.notes.trim().length === 0 && entry.review === null
 }
 
-/**
- * 把一份结果记进它所属的那一周。
- * `week` 一般不用传：默认按 `at` 落在那一周 —— 周日晚十一点和周一早九点
- * 会落到不同的周，这是刻意的（档案要跟真实日期一致，而不是跟「感觉」一致）。
- */
-export function archiveResult(
-  list: WeekEntry[],
-  result: WeeklyResult,
-  at: number,
-  week: WeekKey = weekKeyOf(new Date(at)),
-): WeekEntry[] {
-  return upsertWeek(list, { week, savedAt: at, result })
+/** 同一周只留一份：后来的覆盖先前的 */
+export function upsertWeek(list: WeekEntry[], entry: WeekEntry): WeekEntry[] {
+  const rest = list.filter((e) => e.week !== entry.week)
+  if (isEmptyEntry(entry)) return trim(rest)
+  return trim([...rest, entry])
 }
 
 export function findEntry(list: WeekEntry[], week: WeekKey): WeekEntry | null {
   return list.find((e) => e.week === week) ?? null
 }
 
-/** 就地改某一周（总览页里直接编辑旧周那条路）；那一周不存在时原样返回 */
-export function updateWeekResult(
+/** 原地改某一周（原文、复盘结果都走这里）；那一周不存在时**建一条** */
+export function updateWeek(
   list: WeekEntry[],
   week: WeekKey,
-  result: WeeklyResult,
+  patch: Partial<Pick<WeekEntry, 'notes' | 'review' | 'dropped'>>,
   at: number,
 ): WeekEntry[] {
   const existing = findEntry(list, week)
-  if (!existing) return list
-  return upsertWeek(list, { week, savedAt: at, result })
+  // dropped 跟着写下去：改原文、重做复盘都不该把「用户删过什么」洗掉，
+  // 否则下一次合并就再也拦不住那些被删掉的条目
+  const dropped = patch.dropped ?? existing?.dropped ?? []
+  return upsertWeek(list, {
+    week,
+    savedAt: at,
+    notes: patch.notes ?? existing?.notes ?? '',
+    review: patch.review !== undefined ? patch.review : (existing?.review ?? null),
+    // 一条都没删过时不留这个字段，存量记录的形状保持不变
+    ...(dropped.length > 0 ? { dropped } : {}),
+  })
 }
 
 /**
- * 把一份结果挪到前后几周 —— 周一早上补做上周的复盘时，它会落到新的一周里。
- * 目标那一周已经有记录时**原样返回**：宁可不挪，也不能悄悄顶掉另一周的存档。
+ * 这一周摆在列表上的那行字：先是 AI 那句话（主线），一句话没写出来时退到
+ * 第一条「做了什么」，再退到第一条问题、第一条计划 —— 总比让日历上写着
+ * 「还没复盘」强，那明明复盘过了。对账项不参与：那是**上周**的事，
+ * 摆在这一周的格子里会看错周。
  */
-export function moveWeek(list: WeekEntry[], from: WeekKey, delta: number): WeekEntry[] {
-  const entry = findEntry(list, from)
-  if (!entry || delta === 0) return list
-  const target = addWeeks(from, delta)
-  if (target === from || findEntry(list, target)) return list
-  return trim([...list.filter((e) => e.week !== from), { ...entry, week: target }])
+export function mainLine(entry: WeekEntry | null): string {
+  const review = entry?.review
+  if (!review) return ''
+  const candidates = [
+    review.headline,
+    ...review.did,
+    ...review.issues.map((issue) => issue.text),
+    ...review.plan.map((item) => item.text),
+  ]
+  for (const text of candidates) {
+    const line = text.trim()
+    if (line) return line
+  }
+  return ''
 }
 
-/** 这一周的主线：第一条非空的主线。没有就是空串，界面照实说「没写主线」 */
-export function mainLine(entry: WeekEntry | null): string {
-  if (!entry) return ''
-  return entry.result.highlights.find((h) => h.trim().length > 0)?.trim() ?? ''
+/**
+ * 把某一周的记录挪到另一周 —— 记错周的时候用。
+ *
+ * 两个「原样返回」都是有意的：目标周**已经有记录**时绝不顶掉（那份是
+ * 用户真写出来的东西，代价比多跑一次「挪」大得多）；来源周没记录时也没得挪。
+ * 调用方拿返回值和原数组比引用就知道挪没挪成（`next === list` 即没动）。
+ */
+export function moveWeek(
+  list: WeekEntry[],
+  from: WeekKey,
+  to: WeekKey,
+  at: number,
+): WeekEntry[] {
+  if (from === to) return list
+  const entry = findEntry(list, from)
+  if (!entry) return list
+  if (findEntry(list, to)) return list
+  const rest = list.filter((e) => e.week !== from)
+  return trim([...rest, { ...entry, week: to, savedAt: at }])
 }
 
 export interface WeekCounts {
-  events: number
-  people: number
-  things: number
-  pending: number
-  /** 主线那几条 */
-  highlights: number
+  did: number
+  issues: number
   plan: number
+  /** 对账过的上周行动项条数 */
+  reconcile: number
 }
 
-export function weekCounts(result: WeeklyResult): WeekCounts {
+export function weekCounts(review: Review | null): WeekCounts {
   return {
-    events: result.events.length,
-    people: result.people.length,
-    things: result.things.length,
-    pending: result.pending.length,
-    highlights: result.highlights.length,
-    plan: result.nextFocus.length + result.nextFollowUps.length,
+    did: review?.did.length ?? 0,
+    issues: review?.issues.length ?? 0,
+    plan: review?.plan.length ?? 0,
+    reconcile: review?.reconcile.length ?? 0,
+  }
+}
+
+/**
+ * 同一个问题标签在**这周之前**出现过几次。
+ *
+ * 界面拿它显示「这个问题第三周出现了」——这是 0.9.0 要的那层
+ * 「把几周连起来看」，靠的是模型给出的稳定 key，而不是字符串相似度。
+ */
+export function repeatCount(list: WeekEntry[], week: WeekKey, key: string): number {
+  const past = list
+    .filter((entry) => entry.week < week)
+    .map((entry) => (entry.review?.issues ?? []).map((issue) => issue.key))
+  return countKeys(past, key)
+}
+
+/**
+ * 交给模型的「上周语境」：紧邻的那一周的计划与问题标签。
+ *
+ * 只看紧邻的上一周，不往前翻：对账的对象是「上周定的东西」，
+ * 拿三周前的计划来问「做了吗」只会让人困惑。上一周没记录就是 null。
+ */
+export function previousWeekContext(list: WeekEntry[], week: WeekKey): PreviousWeek | null {
+  const prev = findEntry(list, addWeeks(week, -1))
+  if (!prev) return null
+  return {
+    week: prev.week,
+    weekText: weekRangeText(prev.week),
+    plan: prev.review?.plan ?? [],
+    issues: (prev.review?.issues ?? []).map((issue) => ({ text: issue.text, key: issue.key })),
   }
 }
 

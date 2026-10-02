@@ -1,298 +1,176 @@
 import { describe, expect, it } from 'vitest'
-import {
-  createMockAi,
-  extractName,
-  groupAnswers,
-  isNonAnswer,
-  personHint,
-  sampleAnswer,
-  shouldFollowUp,
-} from './mockAi'
-import {
-  createInterview,
-  currentFollowUp,
-  currentQuestion,
-  finishAll,
-  nextStep,
-  openBlock,
-} from './interview'
-import { MAX_FOLLOWUPS_PER_QUESTION } from './script'
-import type { BlockProgress, ChatMessage, Dimension, InterviewState } from './types'
+import type { ReviewRequest } from './aiClient'
+import { createMockAi } from './mockAi'
+import type { PreviousWeek } from './review'
 
-const ai = createMockAi({ instant: true })
+/**
+ * 假分析器的「读法」测试。
+ *
+ * 它不追求像真模型，只追求**可预期**：同一段原文读两次结果一样，
+ * 什么地方进 did、什么地方进 issues、什么地方进 plan，都由这里钉死。
+ * 这组用例同时是「没填 Key 的人看到的那套演示」的说明书。
+ */
 
-let seq = 0
-function msg(role: 'ai' | 'user', text: string, dimension: Dimension): ChatMessage {
-  seq += 1
-  return { id: `m${seq}`, role, text, dimension, at: seq }
-}
+const instant = createMockAi({ instant: true })
 
-/** 只覆盖想改的那几项，其余进度沿用初始值 */
-function withBlocks(patch: Partial<Record<Dimension, Partial<BlockProgress>>>): InterviewState {
-  const blocks = { ...createInterview().blocks }
-  for (const [dim, part] of Object.entries(patch)) {
-    const key = dim as Dimension
-    if (part) blocks[key] = { ...blocks[key], ...part }
+function req(notes: string, patch: Partial<ReviewRequest> = {}): ReviewRequest {
+  return {
+    week: '2026-09-21',
+    weekText: '9月21日 – 9月27日',
+    notes,
+    previous: null,
+    isFollowUp: false,
+    ...patch,
   }
-  return { active: null, blocks }
 }
 
-const FULL_HISTORY: ChatMessage[] = [
-  msg('ai', '周末好。这周主要忙了些什么？', 'event'),
-  msg('user', '在改客户那个方案，改了三版了还没定下来。', 'event'),
-  msg('user', '本来想把季度数据整理一下，一直没腾出时间。', 'event'),
-  msg('ai', '好，说说人。这周跟谁打交道最多？', 'people'),
-  msg('user', '主要是跟老王对接方案，还有跟小李吃了顿饭。', 'people'),
-  msg('user', '想约张总聊聊明年的方向，但一直没敢开口。', 'people'),
-  msg('ai', '再说说东西 —— 这周买了什么、或者添置了什么东西？', 'thing'),
-  msg('user', '买了个新键盘，之前那个手感不行，纠结了半个月终于下单了。', 'thing'),
-  msg('user', '没有，这周没顾上这些。', 'thing'),
-  msg('ai', '换个角度。这周整体感觉怎么样，累不累？', 'mood'),
-  msg('user', '挺累的，主要就是方案反复改这件事拖着。', 'mood'),
-]
+function previousWeek(patch: Partial<PreviousWeek> = {}): PreviousWeek {
+  return {
+    week: '2026-09-14',
+    weekText: '9月14日 – 9月20日',
+    plan: [],
+    issues: [],
+    ...patch,
+  }
+}
 
-describe('演示用假 AI · 对话', () => {
-  it('区块第一次被打开时，给出开场语和第一个问题', async () => {
-    const text = await ai.nextMessage(createInterview(), 'event', [])
-    expect(text).toContain('周末好')
-    expect(text).toContain('这周主要忙了些什么')
+/** 一段有典型三类的原文：做的事、出的问题、下周打算 */
+const NOTES = [
+  '这周主要在改客户那个方案，来回改了三版还没定。',
+  '周四临时插进来一个线上故障，盯了大半天。',
+  '客户方案一直拖着没拍板，我有点烦。',
+  '睡眠不太好，平均睡六个多小时。',
+  '下周一把报价单发给客户，周三前把线上故障的复盘写完。',
+].join('\n')
+
+describe('演示用假 AI · 把原文分成五段', () => {
+  it('从一段中文原文里分出做了什么、问题与下周计划', async () => {
+    const { review } = await instant.analyze(req(NOTES))
+
+    expect(review.did.join(' ')).toContain('改了三版')
+    expect(review.did.join(' ')).toContain('线上故障')
+    expect(review.issues.map((i) => i.text).join(' ')).toContain('拖着')
+    expect(review.plan.map((p) => p.text).join(' ')).toContain('报价单')
+
+    // 三样互不串台：进过 plan 的那句不该再出现在 did 里
+    expect(review.did.join(' ')).not.toContain('报价单')
+    expect(review.headline).toContain('这周主要是')
   })
 
-  it('不是首次进入时，只问问题，不加开场语', async () => {
-    const s = openBlock(createInterview(), 'event')
-    const text = await ai.nextMessage(s, 'event', FULL_HISTORY)
-    expect(text).toBe(currentQuestion(s, 'event'))
-  })
-
-  it('追问态返回追问话术', async () => {
-    const s = withBlocks({ event: { askIndex: 0, followUpCount: 1, complete: false } })
-    expect(await ai.nextMessage(s, 'event', FULL_HISTORY)).toBe(currentFollowUp(s, 'event'))
-  })
-
-  it('区块聊完后给出收尾语，并提示下一块', async () => {
-    const s = withBlocks({
-      event: { askIndex: 2, followUpCount: 0, complete: true },
-      people: { askIndex: 2, followUpCount: 0, complete: true },
-      thing: { askIndex: 2, followUpCount: 0, complete: true },
-    })
-    const text = await ai.nextMessage(s, 'thing', FULL_HISTORY)
-    expect(text).toContain('物品')
-    expect(text).toContain('状态')
-  })
-
-  it('四块都聊完后提示可以生成梳理', async () => {
-    const text = await ai.nextMessage(finishAll(createInterview()), 'mood', FULL_HISTORY)
-    expect(text).toContain('生成')
-  })
-
-  it('回答太短就追问，回答完整就换下一题', () => {
-    const s = createInterview()
-    expect(shouldFollowUp('改方案', s, 'event')).toBe(true)
-    expect(
-      shouldFollowUp(
-        '这周主要是在改客户那个方案，来回改了三版，中间还开了很多会，最后终于定下来了。',
-        s,
-        'event',
-      ),
-    ).toBe(false)
-  })
-
-  it('「没有」这类回答不追问，空回答也不追问', () => {
-    const s = createInterview()
-    expect(shouldFollowUp('没有，这周没顾上这些。', s, 'thing')).toBe(false)
-    expect(shouldFollowUp('   ', s, 'event')).toBe(false)
-  })
-
-  it('到达追问上限后不再追问', () => {
-    const s = withBlocks({
-      thing: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
-    })
-    expect(shouldFollowUp('短', s, 'thing')).toBe(false)
-  })
-
-  it('主问题聊完之后接着说，就不再催他换块了', async () => {
-    const s = withBlocks({ event: { complete: true, freeTurns: 1 } })
-    const text = await ai.nextMessage(s, 'event', FULL_HISTORY)
-    expect(text).toContain('还有呢')
-  })
-})
-
-describe('演示用假 AI · 一轮回复', () => {
-  const shortAnswer = [msg('ai', '这周主要忙了些什么？', 'event'), msg('user', '改方案', 'event')]
-  const longAnswer = [
-    msg('ai', '这周主要忙了些什么？', 'event'),
-    msg(
-      'user',
-      '这周主要是在改客户那个方案，来回改了三版，中间还开了很多会，最后终于定下来了。',
-      'event',
-    ),
-  ]
-
-  it('reply 一次就同时给出「要不要追问」和下一句话', async () => {
-    const s = openBlock(createInterview(), 'event')
-    const turn = await ai.reply(s, 'event', shortAnswer)
-    expect(turn.wantsFollowUp).toBe(true)
-    expect(turn.message.length).toBeGreaterThan(0)
-  })
-
-  it('不需要追问时，reply 的话术正好是状态机推进后的下一题', async () => {
-    const s = openBlock(createInterview(), 'event')
-    const turn = await ai.reply(s, 'event', longAnswer)
-    expect(turn.wantsFollowUp).toBe(false)
-    expect(turn.message).toBe(currentQuestion(nextStep(s, 'event', false), 'event'))
-  })
-
-  it('reply 会通过 onDelta 把内容吐出去，拼起来等于完整回复', async () => {
-    const s = openBlock(createInterview(), 'event')
-    const pieces: string[] = []
-    const turn = await ai.reply(s, 'event', longAnswer, (d) => pieces.push(d))
-    expect(pieces.length).toBeGreaterThan(0)
-    expect(pieces.join('')).toBe(turn.message)
-  })
-
-  it('非 instant 模式下是分多次吐字，而不是一次性给完', async () => {
-    const slow = createMockAi()
-    const s = openBlock(createInterview(), 'event')
-    const pieces: string[] = []
-    const turn = await slow.reply(s, 'event', longAnswer, (d) => pieces.push(d))
-    expect(pieces.length).toBeGreaterThan(1)
-    expect(pieces.join('')).toBe(turn.message)
-  })
-
-  it('追问次数到顶时，reply 不再追问', async () => {
-    const s = withBlocks({
-      event: { askIndex: 0, followUpCount: MAX_FOLLOWUPS_PER_QUESTION, complete: false },
-    })
-    const turn = await ai.reply(s, 'event', shortAnswer)
-    expect(turn.wantsFollowUp).toBe(false)
-  })
-})
-
-describe('演示用假 AI · 人名与归类', () => {
-  it('能从中文句子里猜出人名', () => {
-    expect(extractName('@张三 那边还没给反馈')).toBe('张三')
-    expect(extractName('想约张总聊聊明年的方向，但一直没敢开口。')).toBe('张总')
-    expect(extractName('主要是跟老王对接方案，还有跟小李吃了顿饭。')).toBe('老王')
-  })
-
-  it('猜不出人名时返回 null，避免把普通句子当成人', () => {
-    expect(personHint('要把季度数据整理完')).toBeNull()
-    expect(personHint('给自己留出整块时间')).toBeNull()
-    expect(personHint('写个总结')).toBeNull()
-  })
-
-  it('能识别「没有」这类非回答', () => {
-    expect(isNonAnswer('暂时没有，这周没顾上这些。')).toBe(true)
-    expect(isNonAnswer('没什么')).toBe(true)
-    expect(isNonAnswer('想换个键盘')).toBe(false)
-  })
-
-  it('按区块归类用户回答，物品单独一块', () => {
-    const grouped = groupAnswers(FULL_HISTORY)
-    expect(grouped.event).toHaveLength(2)
-    expect(grouped.people).toHaveLength(2)
-    expect(grouped.thing).toHaveLength(2)
-    expect(grouped.mood).toHaveLength(1)
-  })
-
-  it('示例回答覆盖全部四个区块', () => {
-    for (const dim of ['event', 'people', 'thing', 'mood'] as Dimension[]) {
-      expect(sampleAnswer(dim, 0).length).toBeGreaterThan(0)
-    }
-    expect(sampleAnswer('event', 4)).toBe(sampleAnswer('event', 0))
-  })
-})
-
-describe('演示用假 AI · 结果生成', () => {
-  it('事情、人际、物品三块都归纳出内容', async () => {
-    const r = await ai.summarize(FULL_HISTORY)
-
-    expect(r.events.join(' ')).toContain('客户那个方案')
-    expect(r.people.map((p) => p.name)).toEqual(expect.arrayContaining(['老王', '张总']))
-    expect(r.things.join(' ')).toContain('键盘')
-  })
-
-  it('「没有」这类回答不会被当成一条物品记录', async () => {
-    const r = await ai.summarize(FULL_HISTORY)
-    expect(r.things.join(' ')).not.toContain('没有')
-  })
-
-  it('给出热点与三条下周建议', async () => {
-    const r = await ai.summarize(FULL_HISTORY)
-    expect(r.highlights.length).toBeGreaterThan(0)
-    expect(r.nextFocus).toHaveLength(3)
-    expect(r.nextFollowUps.length).toBeGreaterThan(0)
-  })
-
-  it('完全没聊到内容时给出兜底结果', async () => {
-    const r = await ai.summarize([])
-    expect(r.events.length).toBeGreaterThan(0)
-    expect(r.highlights.length).toBeGreaterThan(0)
-    expect(r.nextFocus.length).toBeGreaterThan(0)
-  })
-
-  it('全部回答都是「没有」时也走兜底，不编造内容', async () => {
-    const empty: ChatMessage[] = [
-      msg('user', '没有。', 'event'),
-      msg('user', '暂时没有。', 'people'),
-      msg('user', '没什么。', 'thing'),
-      msg('user', '还好。', 'mood'),
-    ]
-    const r = await ai.summarize(empty)
-    expect(r.events).toEqual(['（这次没有聊到具体的事情）'])
-    expect(r.things).toEqual([])
-  })
-})
-
-describe('演示用假 AI · 用户补充后重新整理', () => {
-  it('尊重用户已经手工做过的修改', async () => {
-    const initial = await ai.summarize(FULL_HISTORY)
-    const edited = {
-      ...initial,
-      events: ['我自己改过的事情', ...initial.events],
-      people: [...initial.people, { name: '手工加的人', note: '我加的' }],
-    }
-
-    const next = await ai.refine(FULL_HISTORY, edited, '下周要跟赵总确认一下预算。')
-
-    expect(next.events).toContain('我自己改过的事情')
-    expect(next.people.map((p) => p.name)).toContain('手工加的人')
-  })
-
-  it('把补充内容分别识别成人、物品和未办的事', async () => {
-    const initial = await ai.summarize(FULL_HISTORY)
-    const next = await ai.refine(
-      FULL_HISTORY,
-      initial,
-      '下周要跟赵总确认预算。想换个显示器。体检还一直没预约。',
+  it('一句话里有「拖延」时，问题带出「拖延」这个 key，建议不为空', async () => {
+    const { review } = await instant.analyze(
+      req('客户方案一直拖延着没拍板，烦。\n这周开了三次评审会。'),
     )
 
-    expect(next.people.map((p) => p.name)).toContain('赵总')
-    expect(next.things.join(' ')).toContain('显示器')
-    expect(next.pending.join(' ')).toContain('体检')
+    const issue = review.issues[0]
+    expect(issue.key).toBe('拖延')
+    expect(issue.advice.length).toBeGreaterThan(0)
+    expect(issue.advice.join(' ')).toContain('拆成两步')
   })
 
-  it('补充后重新给出热点与三条建议', async () => {
-    const initial = await ai.summarize(FULL_HISTORY)
-    const next = await ai.refine(FULL_HISTORY, initial, '下周要跟赵总确认预算。')
+  it('「下周…」这类开头的话进 plan，并且 when 有值', async () => {
+    const { review } = await instant.analyze(req('下周把报价单发给客户。'))
 
-    expect(next.highlights.length).toBeGreaterThan(0)
-    expect(next.nextFocus).toHaveLength(3)
-    expect(next.nextFollowUps.length).toBeGreaterThan(0)
+    expect(review.plan).toHaveLength(1)
+    expect(review.plan[0].text).toContain('报价单')
+    expect(review.plan[0].when).toBe('下周')
   })
 
-  it('补充为空时不会破坏原有结果', async () => {
-    const initial = await ai.summarize(FULL_HISTORY)
-    const next = await ai.refine(FULL_HISTORY, initial, '   ')
-    expect(next.events).toEqual(initial.events)
-    expect(next.things).toEqual(initial.things)
-    expect(next.nextFocus).toEqual(initial.nextFocus)
+  it('没写具体的事时，headline 明说这一周没什么内容', async () => {
+    const { review } = await instant.analyze(req('客户方案一直拖着没拍板。'))
+
+    expect(review.did).toEqual([])
+    expect(review.headline).toBe('这一周没写出什么具体做的事。')
+  })
+})
+
+describe('演示用假 AI · 和上周对账', () => {
+  it('上周的行动项这周提到了，按有没有「做完」判成 done 或 partial', async () => {
+    const previous = previousWeek({
+      plan: [
+        { text: '把方案发给客户', when: '周一' },
+        { text: '整理季度数据', when: '' },
+        { text: '预约体检', when: '' },
+      ],
+    })
+    const { review } = await instant.analyze(
+      // 「已经」是判成做完了的口头信号之一（DONE_HINT），光说「发过去了」还不算
+      req('周一就把方案发过去了，已经发到客户手上。\n季度数据整理了一半，还差两个系统。', {
+        previous,
+      }),
+    )
+
+    const byText = new Map(review.reconcile.map((r) => [r.text, r]))
+    // 原样照抄上周那条，不重写
+    expect([...byText.keys()]).toEqual(['把方案发给客户', '整理季度数据', '预约体检'])
+    expect(byText.get('把方案发给客户')?.state).toBe('done')
+    expect(byText.get('把方案发给客户')?.note).toBe('这周写到了')
+    expect(byText.get('整理季度数据')?.state).toBe('partial')
+    expect(byText.get('整理季度数据')?.note).toContain('季度数据')
+    expect(byText.get('预约体检')?.state).toBe('unmentioned')
+    expect(byText.get('预约体检')?.note).toBe('')
   })
 
-  it('重复补充不会产生重复条目', async () => {
-    const initial = await ai.summarize(FULL_HISTORY)
-    const once = await ai.refine(FULL_HISTORY, initial, '下周要跟赵总确认预算。')
-    const twice = await ai.refine(FULL_HISTORY, once, '下周要跟赵总确认预算。')
-    expect(twice.people.filter((p) => p.name === '赵总')).toHaveLength(1)
+  it('原文里出现「搞定」这类字眼就算做完了', async () => {
+    const previous = previousWeek({ plan: [{ text: '把报价发出去', when: '' }] })
+    const { review } = await instant.analyze(req('报价的事搞定了，周五就发出去了。', { previous }))
+
+    expect(review.reconcile[0].state).toBe('done')
+  })
+
+  it('没有上一周时，对账那一栏是空的，不会硬凑', async () => {
+    const { review } = await instant.analyze(req(NOTES))
+    expect(review.reconcile).toEqual([])
+  })
+
+  it('上周的老问题这周又出现时，nudge 明说「上周也在」', async () => {
+    const previous = previousWeek({ issues: [{ text: '客户方案一直拖延着没拍板', key: '拖延' }] })
+    const { review } = await instant.analyze(
+      req('客户方案又拖着没定，我催了两次也没用。\n这周开了三次评审会。', { previous }),
+    )
+
+    expect(review.nudge).toContain('上周也在')
+    expect(review.nudge).toContain('这周又碰上了')
+  })
+})
+
+describe('演示用假 AI · 补漏提醒', () => {
+  it('一个字都没提到钱时，nudge 里出现「钱」那一角', async () => {
+    const notes = [
+      '这周跟老王吃了顿饭，聊得挺放松。',
+      '跑了三次步，身体比上周好点。',
+      '心情还行，周末看了部电影。',
+      '想明白了：先把一件事做完再说。',
+    ].join('\n')
+    const { review } = await instant.analyze(req(notes))
+
+    expect(review.nudge).toContain('钱')
+  })
+
+  it('空原文给出明确的空态 headline，而不是编出一份复盘', async () => {
+    const { review } = await instant.analyze(req('   \n  '))
+
+    expect(review.headline).toBe('这一周还没写出什么。')
+    expect(review.did).toEqual([])
+    expect(review.issues).toEqual([])
+    expect(review.plan).toEqual([])
+    expect(review.nudge).toContain('先随手写两句')
+  })
+})
+
+describe('演示用假 AI · 补充与耗时', () => {
+  it('补充说明时给一句 reply，第一次整理时是空串', async () => {
+    const followUp = await instant.analyze(req(NOTES, { isFollowUp: true }))
+    expect(followUp.reply.length).toBeGreaterThan(0)
+    expect(followUp.review.headline.length).toBeGreaterThan(0)
+
+    const first = await instant.analyze(req(NOTES))
+    expect(first.reply).toBe('')
+  })
+
+  it('instant 模式下不等那 900 毫秒', async () => {
+    const startedAt = Date.now()
+    await instant.analyze(req(NOTES))
+    expect(Date.now() - startedAt).toBeLessThan(500)
   })
 })

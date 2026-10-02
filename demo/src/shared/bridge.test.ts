@@ -4,8 +4,8 @@ import type { AiWeeklyBridge } from './ipc'
 
 /**
  * 「装在哪个壳里」这件事只由这一处判断决定：
- * 有桥就是 Electron（走主进程），没桥就是浏览器（走 fetch + localStorage）。
- * 判错了，界面要么发不出请求、要么读不到上次的会话，所以单独测。
+ * 有桥就是 Electron（走主进程，配置与归档都归它管），没桥就是浏览器。
+ * 判错了，界面要么发不出请求、要么存不下这一周的复盘，所以单独测。
  */
 
 interface GlobalWithBridge {
@@ -22,9 +22,6 @@ function fullBridge(): AiWeeklyBridge {
     store: {
       loadConfig: () => null,
       saveConfig: () => {},
-      loadSession: () => null,
-      saveSession: () => {},
-      clearSession: () => {},
       loadArchive: () => null,
       saveArchive: () => {},
     },
@@ -36,7 +33,7 @@ afterEach(() => {
 })
 
 describe('运行环境探测 · 预加载的桥在不在', () => {
-  it('浏览器里没有桥，退回 fetch + localStorage 那条路', () => {
+  it('浏览器里没有桥，就自己发请求、自己存', () => {
     expect(getBridge()).toBeNull()
   })
 

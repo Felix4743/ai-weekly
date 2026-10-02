@@ -1,12 +1,6 @@
 import type { WeekEntry } from '../core/archive'
 import type { AppConfig } from '../core/types'
-import {
-  normalizeArchive,
-  normalizeConfig,
-  normalizeSession,
-  type AppStore,
-  type SavedSession,
-} from './shape'
+import { normalizeArchive, normalizeConfig, type AppStore } from './shape'
 
 /**
  * 浏览器里的存储：localStorage。
@@ -14,10 +8,7 @@ import {
  * 不该让整个应用打不开。
  */
 
-export type { SavedSession } from './shape'
-
 const CONFIG_KEY = 'ai-weekly:config'
-const SESSION_KEY = 'ai-weekly:last-session'
 const ARCHIVE_KEY = 'ai-weekly:weeks'
 
 function storage(): Storage | null {
@@ -59,24 +50,6 @@ export function saveConfig(config: AppConfig): void {
   write(CONFIG_KEY, config)
 }
 
-export function loadSession(): SavedSession | null {
-  return normalizeSession(read(SESSION_KEY))
-}
-
-export function saveSession(session: SavedSession): void {
-  write(SESSION_KEY, session)
-}
-
-export function clearSession(): void {
-  const s = storage()
-  if (!s) return
-  try {
-    s.removeItem(SESSION_KEY)
-  } catch {
-    /* 同上 */
-  }
-}
-
 export function loadArchive(): WeekEntry[] {
   return normalizeArchive(read(ARCHIVE_KEY))
 }
@@ -86,13 +59,5 @@ export function saveArchive(list: WeekEntry[]): void {
 }
 
 export function createLocalStore(): AppStore {
-  return {
-    loadConfig,
-    saveConfig,
-    loadSession,
-    saveSession,
-    clearSession,
-    loadArchive,
-    saveArchive,
-  }
+  return { loadConfig, saveConfig, loadArchive, saveArchive }
 }

@@ -102,7 +102,7 @@ export async function runSmokeCheck(win: BrowserWindow): Promise<void> {
     // 少注册一个 handler，症状是「总览页永远是空的」—— 启动时同样看不出来。
 
     const archive = (await win.webContents.executeJavaScript(`(async () => {
-      const probe = [{ week: '2026-09-21', savedAt: 1, result: { highlights: ['smoke-probe-week'] } }]
+      const probe = [{ week: '2026-09-21', savedAt: 1, notes: 'smoke-probe-week', review: null }]
       window.aiWeekly.store.saveArchive(probe)
       await new Promise((r) => setTimeout(r, 300))
       const back = window.aiWeekly.store.loadArchive()

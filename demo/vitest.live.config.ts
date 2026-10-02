@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['live/**/*.live.ts'],
-    // 一整场采访 30 来轮，每轮都是一次真实的流式请求
+    // 每个用例都是几次真实的流式请求，模型慢起来一次能跑一两分钟
     testTimeout: 900_000,
     hookTimeout: 120_000,
     // 报告要一行行看清，别被 vitest 的进度条搅乱

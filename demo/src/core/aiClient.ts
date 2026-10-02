@@ -1,51 +1,34 @@
-import type { ChatMessage, Dimension, InterviewState, WeeklyResult } from './types'
-
-/** 流式增量回调：模型每吐出一小段就调一次 */
-export type DeltaHandler = (delta: string) => void
-
-/** 用户答完一句之后，模型这一轮的产出 */
-export interface TurnResult {
-  /** 要不要针对当前主问题再追一句 */
-  wantsFollowUp: boolean
-  /** 接下来要说的话（已经去掉行首标记） */
-  message: string
-}
+import type { PreviousWeek, Review } from './review'
+import type { WeekKey } from './week'
 
 /**
- * AI 能力接口。
+ * AI 那一层的接口。
  *
- * 上层（App / UI）只依赖这个接口，因此假 AI 与真实模型可以互换。
- * 注意分工：**覆盖由状态机保证，这里只负责措辞**。
+ * 0.9.0 只剩一个动作：`analyze` —— 把这一周的原文交出去，拿回一份复盘。
+ * 旧的 nextMessage / reply / summarize 那套「采访 + 整理」两件事，
+ * 随着采访流程一起删掉了：这一版 AI 不提问，只分析。
  */
+
+export type DeltaHandler = (delta: string) => void
+
+export interface ReviewRequest {
+  week: WeekKey
+  /** `9月28日 – 10月4日` 这种给人看的说法，模型据此知道窗口是哪七天 */
+  weekText: string
+  /** 用户自己写的那一段原文 */
+  notes: string
+  /** 上一周的复盘语境；没有就是 null */
+  previous: PreviousWeek | null
+  /** 用户在第一次整理之后又补了话 */
+  isFollowUp: boolean
+}
+
+export interface ReviewOutcome {
+  review: Review
+  /** 补充/反驳时 AI 的一句话回应；第一次整理是空串（**不落盘**，见过就完了） */
+  reply: string
+}
+
 export interface AiClient {
-  /**
-   * 区块第一次被打开、或已经聊完时，给出这一句话。
-   * 调用方传进来的 state 已经包含当前进度。
-   */
-  nextMessage(
-    state: InterviewState,
-    dim: Dimension,
-    history: ChatMessage[],
-    onDelta?: DeltaHandler,
-  ): Promise<string>
-
-  /**
-   * 用户答完一句之后的**唯一一次**调用：同时给出「是否追问」和「下一句话」。
-   * 真实模型下这就是一次请求 —— 分成两次会让每轮多一倍延迟和花费。
-   */
-  reply(
-    state: InterviewState,
-    dim: Dimension,
-    history: ChatMessage[],
-    onDelta?: DeltaHandler,
-  ): Promise<TurnResult>
-
-  /** 汇总全部对话，产出结构化结果 */
-  summarize(history: ChatMessage[]): Promise<WeeklyResult>
-
-  /**
-   * 用户看过结果、做了修改并补充说明之后，重新整理一遍。
-   * 约定：清单内容尊重用户的修改，只重新生成「本周热点」与「下周计划」。
-   */
-  refine(history: ChatMessage[], current: WeeklyResult, note: string): Promise<WeeklyResult>
+  analyze(req: ReviewRequest, onDelta?: DeltaHandler): Promise<ReviewOutcome>
 }
