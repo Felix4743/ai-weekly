@@ -6,13 +6,10 @@ release/
 .electron-cache/
 # 真模型试跑台（npm run try:model）吐出来的报告：本机产物，不进版本库
 live-output/
-# mvp/ 默认整块忽略：这地方以前放过一份装好的应用（几百 MB 的 Electron），
-# 现在也仍然会放一份（mvp/ai-weekly/，装的是当前版本，给人直接点开看）。
-# 只放行归档快照本身 —— 那是 git archive 出来的纯源码，要进版本库。
+# mvp/ 默认整块忽略：这地方放的是装好的应用（几百 MB 的 Electron 运行时，
+# mvp/ai-weekly/），给人直接点开看。源码快照不再往这里放了 —— 那是 tag 的事。
 mvp/*
 !mvp/README.md
-!mvp/mvp-v0.5/
-!mvp/mvp-v0.8/
 *.local
 .DS_Store
 *.log
