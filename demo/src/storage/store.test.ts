@@ -148,6 +148,19 @@ describe('存储 · 形状归一化', () => {
       expect(normalizeArchive([{ week: '2026-09-21', result: {} }])[0].savedAt).toBeGreaterThan(0)
     })
 
+    it('时间戳是个坏数字（NaN / Infinity）也当没有，补成现在', () => {
+      // 只判 typeof === 'number' 的话 NaN 会溜进来，把排序和「上次记录」一起带坏
+      const list = normalizeArchive([
+        { week: '2026-09-21', savedAt: Number.NaN, result: {} },
+        { week: '2026-09-14', savedAt: Number.POSITIVE_INFINITY, result: {} },
+      ])
+      expect(list.map((e) => e.week).sort()).toEqual(['2026-09-14', '2026-09-21'])
+      for (const entry of list) {
+        expect(Number.isFinite(entry.savedAt)).toBe(true)
+        expect(entry.savedAt).toBeGreaterThan(0)
+      }
+    })
+
     it('同一周出现两条时只留一条，不给日历画出两行', () => {
       const list = normalizeArchive([
         { week: '2026-09-21', savedAt: 1, result: { highlights: ['旧的'] } },

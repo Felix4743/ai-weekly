@@ -4,6 +4,7 @@ import {
   archiveResult,
   archiveStats,
   findEntry,
+  lastWrittenAt,
   mainLine,
   moveWeek,
   recentSlots,
@@ -187,6 +188,36 @@ describe('归档 · 读出来是什么', () => {
 
   it('空存档不会算出一条假的连续记录', () => {
     const stats = archiveStats([], at(2026, 9, 30))
-    expect(stats).toEqual({ weeks: 0, streak: 0, latest: null, hasThisWeek: false })
+    expect(stats).toEqual({
+      weeks: 0,
+      streak: 0,
+      latest: null,
+      hasThisWeek: false,
+      lastWritten: null,
+    })
+  })
+
+  it('「上次记录」取的是最近一次写入，而不是最近的那一周', () => {
+    // 三个月前那一周今天被改过：latest 还是那个老周，但上次动手是今天
+    const today = at(2026, 9, 30).getTime()
+    const list = [
+      entry('2026-06-29', {}, today),
+      entry('2026-09-21', {}, at(2026, 9, 22).getTime()),
+    ]
+    const stats = archiveStats(list, at(2026, 9, 30))
+    expect(stats.latest).toBe('2026-09-21')
+    expect(stats.lastWritten).toBe(today)
+  })
+
+  it('脏时间戳被跳过，不会顶掉真实的那一条', () => {
+    const good = at(2026, 9, 22).getTime()
+    expect(
+      lastWrittenAt([
+        { week: '2026-09-14', savedAt: Number.NaN, result: result() },
+        { week: '2026-09-21', savedAt: good, result: result() },
+      ]),
+    ).toBe(good)
+    expect(lastWrittenAt([{ week: '2026-09-21', savedAt: Number.NaN, result: result() }])).toBeNull()
+    expect(lastWrittenAt([])).toBeNull()
   })
 })

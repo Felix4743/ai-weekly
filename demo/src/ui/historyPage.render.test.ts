@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { WeekEntry } from '../core/archive'
+import { stampText } from '../core/recency'
 import { createEmptyResult, type WeeklyResult } from '../core/types'
 import { addWeeks, monthLabel, monthOf, weekKeyOf, weekRangeText } from '../core/week'
 import { HistoryPage } from './HistoryPage'
@@ -26,8 +27,12 @@ function result(overrides: Partial<WeeklyResult> = {}): WeeklyResult {
   return { ...createEmptyResult(), ...overrides }
 }
 
-function entry(week: string, overrides: Partial<WeeklyResult> = {}): WeekEntry {
-  return { week, savedAt: NOW.getTime(), result: result(overrides) }
+function entry(
+  week: string,
+  overrides: Partial<WeeklyResult> = {},
+  savedAt: number = NOW.getTime(),
+): WeekEntry {
+  return { week, savedAt, result: result(overrides) }
 }
 
 function render(archive: WeekEntry[]) {
@@ -98,5 +103,27 @@ describe('总览页渲染', () => {
   it('主线一句都没有时照实说，不显示空白卡片', () => {
     const html = render([entry(THIS_WEEK)])
     expect(html).toContain('（这一周没写主线）')
+  })
+
+  it('写着「上次记录 多久以前」，鼠标停上去能看到具体时刻', () => {
+    const at = NOW.getTime() - 3 * 24 * 60 * 60 * 1000
+    const html = render([entry(THIS_WEEK, { highlights: ['有记录'] }, at)])
+    expect(html).toContain('上次记录')
+    expect(html).toContain('3 天前')
+    expect(html).toContain(stampText(at)) // title 里的绝对时刻
+  })
+
+  it('「上次记录」按最近一次写入算，不是按最近的那一周', () => {
+    // 上周那一份是两小时前改的，本周那一份是五天前写的
+    const html = render([
+      entry(LAST_WEEK, { highlights: ['上周的事'] }, NOW.getTime() - 2 * 60 * 60 * 1000),
+      entry(THIS_WEEK, { highlights: ['本周的事'] }, NOW.getTime() - 5 * 24 * 60 * 60 * 1000),
+    ])
+    expect(html).toContain('上次记录 2 小时前')
+    expect(html).not.toContain('5 天前')
+  })
+
+  it('归档为空时不编一个「上次记录」出来', () => {
+    expect(render([])).not.toContain('上次记录')
   })
 })

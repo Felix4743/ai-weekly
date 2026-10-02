@@ -806,6 +806,12 @@ body {
   color: var(--ink-3);
 }
 
+/* 总览页的「上次记录 3 天前」：这一行的落点是它，比后面的统计稍重一点 */
+.last-written {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
 .result-actions {
   display: flex;
   gap: 10px;

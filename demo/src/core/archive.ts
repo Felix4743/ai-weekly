@@ -155,6 +155,22 @@ export interface ArchiveStats {
   streak: number
   latest: WeekKey | null
   hasThisWeek: boolean
+  /**
+   * 最近一次**写入**的时刻 —— 注意这和 `latest` 不是一回事：
+   * 今天去改一笔三个月前的旧周，`latest` 还是那一个月，这里却是今天。
+   * 「上次记录是什么时候」问的是后者：我上次动手是什么时候。
+   */
+  lastWritten: number | null
+}
+
+/** 最近一次写入归档的时刻；归档为空、或里面全是脏时间戳时返回 null */
+export function lastWrittenAt(list: WeekEntry[]): number | null {
+  let newest: number | null = null
+  for (const entry of list) {
+    if (!Number.isFinite(entry.savedAt)) continue
+    if (newest === null || entry.savedAt > newest) newest = entry.savedAt
+  }
+  return newest
 }
 
 export function archiveStats(list: WeekEntry[], now: Date = new Date()): ArchiveStats {
@@ -173,5 +189,6 @@ export function archiveStats(list: WeekEntry[], now: Date = new Date()): Archive
     streak,
     latest,
     hasThisWeek: list.some((e) => e.week === weekKeyOf(now)),
+    lastWritten: lastWrittenAt(list),
   }
 }

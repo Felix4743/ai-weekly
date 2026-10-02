@@ -76,7 +76,7 @@ export function normalizeSession(raw: unknown): SavedSession | null {
   if (!raw || typeof raw !== 'object') return null
   const parsed = raw as Partial<SavedSession>
   if (!Array.isArray(parsed.messages) || !parsed.result) return null
-  const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now()
+  const savedAt = Number.isFinite(parsed.savedAt) ? (parsed.savedAt as number) : Date.now()
   return {
     messages: parsed.messages,
     result: parsed.result,
@@ -103,7 +103,8 @@ export function normalizeArchive(raw: unknown): WeekEntry[] {
     if (!result) continue
     out.push({
       week: parsed.week,
-      savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+      // 不是个正常的数字（缺了、NaN、Infinity）就当下现在写的 —— 排序与「上次记录」都靠它
+      savedAt: Number.isFinite(parsed.savedAt) ? (parsed.savedAt as number) : Date.now(),
       result,
     })
   }

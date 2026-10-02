@@ -10,6 +10,7 @@ import {
   type WeekEntry,
 } from '../core/archive'
 import { resultToMarkdown } from '../core/resultText'
+import { stampText, timeAgo } from '../core/recency'
 import {
   WEEKDAY_NAMES,
   addWeeks,
@@ -136,11 +137,24 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
         <div>
           <h1 className="result-title">总览</h1>
           <p className="result-sub">
-            {stats.weeks === 0
-              ? '还没有记录。聊完一次，那一周就会出现在这里'
-              : `已经记了 ${stats.weeks} 周 · 最近连续 ${stats.streak} 周${
+            {stats.weeks === 0 ? (
+              '还没有记录。聊完一次，那一周就会出现在这里'
+            ) : (
+              <>
+                {/* 鼠标停上去能看到具体到分钟的时刻；平时只写相对说法，一眼就知道多久没记了 */}
+                {stats.lastWritten !== null && (
+                  <>
+                    <span className="last-written" title={stampText(stats.lastWritten)}>
+                      上次记录 {timeAgo(stats.lastWritten, now.getTime())}
+                    </span>
+                    {' · '}
+                  </>
+                )}
+                {`已经记了 ${stats.weeks} 周 · 最近连续 ${stats.streak} 周${
                   stats.hasThisWeek ? '' : ' · 这周还没记'
                 }`}
+              </>
+            )}
           </p>
         </div>
         <div className="result-actions">
