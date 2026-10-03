@@ -120,15 +120,23 @@ describe('专属采访者 · 改不掉的约定', () => {
     expect(withoutMarker()).toContain('不超过 160 字')
   })
 
-  it('约定一共四条并按序号排好，标记规则接在最后当第五条', () => {
+  // 0.9.3 起多了一条「参考题目给的是要问到什么，不是要你念的句子」，所以是五条
+  it('约定一共五条并按序号排好，标记规则接在最后当第六条', () => {
     const plain = withoutMarker()
     expect(plain).toContain('1. ')
-    expect(plain).toContain('4. ')
-    expect(plain).not.toContain('5. ')
+    expect(plain).toContain('5. ')
+    expect(plain).not.toContain('6. ')
 
     const marked = withMarker()
-    expect(marked).toContain('5. ')
-    expect(marked.indexOf('5. ')).toBeGreaterThan(marked.indexOf('4. '))
+    expect(marked).toContain('6. ')
+    expect(marked.indexOf('6. ')).toBeGreaterThan(marked.indexOf('5. '))
+  })
+
+  it('参考题目只给意思：别照抄示例，也别一周又一周用同一句', () => {
+    const text = withoutMarker()
+    expect(text).toContain('参考题目给的是**要问到什么**，不是要你念的句子')
+    expect(text).toContain('别照抄示例')
+    expect(text).toContain('别一周又一周用同一句')
   })
 
   it('约定排在整段 system 的最后，人设盖不住它', () => {

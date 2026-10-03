@@ -41,10 +41,18 @@ function userOf(messages: PromptMessage[]): string {
   return users.length > 0 ? users[users.length - 1].content : ''
 }
 
-/** 按 0.9.1 的状态结构拼一个测试态：区块进度可局部覆盖，档位可指定 */
+/**
+ * 拼一个测试态：区块进度可局部覆盖，档位、状态打分卡是否交过都可指定。
+ * 默认 `stateDone: true`（卡交过了，流程才进到问答），默认档位「还没定」。
+ */
 function stateWith(
   patch: Partial<Record<Dimension, Partial<BlockProgress>>> = {},
-  options: { hasLastWeek?: boolean; depth?: Depth | null; active?: Dimension | null } = {},
+  options: {
+    hasLastWeek?: boolean
+    depth?: Depth | null
+    active?: Dimension | null
+    stateDone?: boolean
+  } = {},
 ): InterviewState {
   const base = createInterview({ hasLastWeek: options.hasLastWeek })
   const blocks = { ...base.blocks }
@@ -52,7 +60,12 @@ function stateWith(
     const p = patch[dim]
     if (p) blocks[dim] = { ...blocks[dim], ...p }
   }
-  return { active: options.active ?? null, blocks, depth: options.depth ?? null }
+  return {
+    active: options.active ?? null,
+    blocks,
+    stateDone: options.stateDone ?? true,
+    depth: options.depth ?? null,
+  }
 }
 
 /** 把某一块标成已经聊完 */
@@ -63,12 +76,12 @@ function done(state: InterviewState, dim: Dimension): InterviewState {
 describe('提示词 · 对话记录', () => {
   it('按区块分组，并标出谁是采访者、谁在回答', () => {
     const t = formatTranscript([
-      msg('ai', '这周主要忙了些什么？', 'event'),
+      msg('ai', '这周主要在忙什么？', 'event'),
       msg('user', '在改客户那个方案', 'event'),
       msg('user', '跟老王对接得比较多', 'people'),
     ])
     expect(t).toContain('【事情】')
-    expect(t).toContain('采访者：这周主要忙了些什么？')
+    expect(t).toContain('采访者：这周主要在忙什么？')
     expect(t).toContain('对方：在改客户那个方案')
     expect(t).toContain('【人际】')
   })
@@ -89,50 +102,58 @@ describe('提示词 · 对话记录', () => {
 })
 
 describe('提示词 · 区块开场与收尾', () => {
-  it('第一块（状态）带打招呼的指示，并给出参考题目', () => {
-    const text = textOf(buildOpeningPrompt(openBlock(createInterview(), 'mood'), 'mood', [], PERSONA))
-    expect(text).toContain('这周身体怎么样')
+  it('第一块带打招呼的指示，并把参考题目当「要问到什么」交给模型', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
+    )
+    expect(text).toContain('这周主要在忙什么')
     expect(text).toContain('打个招呼')
   })
 
   it('后面几块不再打招呼，只做一句自然过渡', () => {
-    const history = [
-      msg('ai', '这周睡眠、运动和吃饭怎么样？', 'mood'),
-      msg('user', '睡得还行', 'mood'),
-    ]
+    const history = [msg('ai', '这周主要在忙什么？', 'event'), msg('user', '在改方案', 'event')]
     const text = textOf(
-      buildOpeningPrompt(
-        openBlock(createInterview(), 'thing'),
-        'thing',
-        history,
-        PERSONA,
-      ),
+      buildOpeningPrompt(openBlock(createInterview(), 'thing'), 'thing', history, PERSONA),
     )
     expect(text).toContain('这周买了点什么')
     expect(text).toContain('自然的话过渡')
     expect(text).not.toContain('打个招呼')
   })
 
-  it('把参考题目和追问池都交给模型，覆盖才不会被漏掉', () => {
-    const text = textOf(buildOpeningPrompt(openBlock(createInterview(), 'mood'), 'mood', [], PERSONA))
-    expect(text).toContain('参考题目（仅供参考，不是必须逐条念）')
-    expect(text).toContain('这周看了什么')
-    expect(text).toContain('追问池（说到才追，不硬问）')
+  it('题目只给「要问到什么」+ 示例，并明确要求别照抄', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
+    )
+    expect(text).toContain('参考题目（给的是**要问到什么**，不是要你念的句子；用你自己的话说）')
+    expect(text).toContain('1. 要问到：这周主要在忙什么（示例：「这周主要在忙什么？」）')
+    expect(text).toContain('不要照抄示例问法')
+    expect(text).toContain('追问的方向（说到才追，不硬问，用你自己的话问）')
+  })
+
+  it('题目池只列 intent，不再给出追问的原句', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
+    )
+    expect(text).toContain('这件事最花时间的是哪一块')
+    // 追问池给的是意思，不是要念的句子
+    expect(text).not.toContain('（示例：「这件事最花时间的是哪一块？」）')
   })
 
   it('开场也带上四个内容块的进度、对账状态和当前档位', () => {
-    const text = textOf(buildOpeningPrompt(openBlock(createInterview(), 'people'), 'people', [], PERSONA))
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'people'), 'people', [], PERSONA),
+    )
     expect(text).toContain('整体进度：')
-    expect(text).toContain('状态（问到第 1/4 题）')
+    expect(text).toContain('事情（问到第 1/6 题）')
+    expect(text).toContain('人际（问到第 1/4 题）')
+    expect(text).toContain('物品与支出（问到第 1/4 题）')
+    expect(text).toContain('成长（问到第 1/2 题）')
     expect(text).toContain('上周对账（还没问）')
     expect(text).toContain('档位：还没定档')
   })
 
   it('上周对账的开场直接带上上周的原文', () => {
-    const history = [
-      msg('ai', '这周睡眠、运动和吃饭怎么样？', 'mood'),
-      msg('user', '还行', 'mood'),
-    ]
+    const history = [msg('ai', '这周主要在忙什么？', 'event'), msg('user', '在改方案', 'event')]
     const text = textOf(
       buildOpeningPrompt(
         openBlock(createInterview(), 'reconcile'),
@@ -159,9 +180,28 @@ describe('提示词 · 区块开场与收尾', () => {
     expect(text).toContain('没有取到上周的内容')
   })
 
+  it('这一周已经聊过一次时，开场要先复述记下的内容，再问今天补什么', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA, {
+        thisWeek: { savedAt: 1, lines: ['在改客户那个方案', '买了新键盘'] },
+      }),
+    )
+    expect(text).toContain('这周他已经聊过一次了，今天是接着上次补')
+    expect(text).toContain('- 在改客户那个方案')
+    expect(text).toContain('- 买了新键盘')
+    expect(text).toContain('别把已经聊过的再问一遍')
+  })
+
+  it('没有「这周已聊过」时，不提「接着上次补」', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
+    )
+    expect(text).not.toContain('接着上次补')
+  })
+
   it('聊完时改成收尾，只提下一块的名称，不许替它先问', () => {
     const state = done(
-      done(stateWith({}, { hasLastWeek: false, depth: 'mid', active: 'event' }), 'mood'),
+      done(stateWith({}, { hasLastWeek: false, depth: 'mid', active: 'event' }), 'reconcile'),
       'event',
     )
     const text = textOf(buildClosingPrompt(state, 'event', PERSONA))
@@ -171,30 +211,39 @@ describe('提示词 · 区块开场与收尾', () => {
     expect(text).toContain('不要替下一块提问')
   })
 
-  it('状态聊完、还没定档时，收尾会问要哪一档深度', () => {
-    const state = done(stateWith({}, { hasLastWeek: false, active: 'mood' }), 'mood')
-    const text = textOf(buildClosingPrompt(state, 'mood', PERSONA))
-    expect(text).toContain('想聊细一点、正常聊，还是今天时间紧抓重点')
+  // 状态打分卡还没交就先聊完了一块：收尾要提醒他去打分，别含糊地说「可以接着聊」
+  it('收尾时只做收尾，不在这一句里替下一块提问', () => {
+    const state = done(
+      stateWith({}, { hasLastWeek: false, stateDone: false, active: 'event' }),
+      'event',
+    )
+    const text = textOf(buildClosingPrompt(state, 'event', PERSONA))
+    expect(text).toContain('先在卡片上把状态打完分')
+    expect(text).toContain('心情、睡眠、运动、饮食')
+    expect(text).toContain('不要替下一块提问')
   })
 
   it('四块都聊完时提示可以生成梳理', () => {
-    expect(textOf(buildClosingPrompt(finishAll(createInterview()), 'mood', PERSONA))).toContain(
-      '生成',
+    const text = textOf(
+      buildClosingPrompt(finishAll(createInterview({ hasLastWeek: false })), 'growth', PERSONA),
     )
+    expect(text).toContain('四个区块都聊过了')
+    expect(text).toContain('生成')
   })
 })
 
 describe('提示词 · 一轮追问判断', () => {
   const history = [
-    msg('ai', '这周主要忙了些什么？', 'event'),
+    msg('ai', '这周主要在忙什么？', 'event'),
     msg('user', '在改客户那个方案，改了三版还没定', 'event'),
   ]
 
-  it('把当前问题、追问次数、当前档位的上限都告诉模型', () => {
+  it('把这一轮要问到什么、追问次数、当前档位的上限都告诉模型', () => {
     const text = textOf(
       buildTurnPrompt(openBlock(createInterview(), 'event'), 'event', history, PERSONA),
     )
-    expect(text).toContain('这周主要忙了些什么')
+    expect(text).toContain('- 这一轮要问到：这周主要在忙什么')
+    expect(text).toContain('- 示例问法（只是意思，用你自己的话说，别照抄）：「这周主要在忙什么？」')
     expect(text).toContain('本题已追问 0 次')
     expect(text).toContain(`上限 ${DEFAULT_FOLLOWUP_CAP} 次`)
   })
@@ -237,12 +286,15 @@ describe('提示词 · 一轮追问判断', () => {
     expect(text).toContain('只能用 [换题] 或 [换块]')
   })
 
-  it('换题时告诉模型下一个参考题目是什么', () => {
+  it('换题时告诉模型下一个要问到什么，并强调没答到就不许跳过', () => {
     const text = textOf(
       buildTurnPrompt(openBlock(createInterview(), 'event'), 'event', history, PERSONA),
     )
-    expect(text).toContain('自然地过渡到下一个参考题目')
-    expect(text).toContain('有没有本来打算做、最后没动的事')
+    expect(text).toContain('自然地过渡到下一个要问到的')
+    expect(text).toContain('有没有本来打算做、最后没动的事，卡在哪一步')
+    expect(text).toContain('先确认这一轮要问到的（这周主要在忙什么）他真的答到了')
+    expect(text).toContain('没答到就换个说法再问一次，不许跳过')
+    expect(text).toContain('措辞由你定，但前面「要问到」的那件事必须问到')
   })
 
   it('这一块参考题目问完时改成收尾，并指向下一块', () => {
@@ -252,26 +304,39 @@ describe('提示词 · 一轮追问判断', () => {
         { event: { askIndex: lastIndex, followUpCount: 0, complete: false } },
         { hasLastWeek: false, depth: 'mid', active: 'event' },
       ),
-      'mood',
+      'reconcile',
     )
     const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
     expect(text).toContain('人际')
     expect(text).toContain('不要替那一块把问题先问了')
   })
 
-  it('状态聊完的下一轮，收尾会带出三档深度那句问法', () => {
-    const lastIndex = (dimensionScript('mood')?.mainQuestions.length ?? 1) - 1
+  it('下一块之前还卡着状态打分卡时，[换块] 的话术是提醒他去打分', () => {
+    const lastIndex = (dimensionScript('event')?.mainQuestions.length ?? 1) - 1
     const state = stateWith(
-      { mood: { askIndex: lastIndex, followUpCount: 0, complete: false } },
-      { hasLastWeek: false, active: 'mood' },
+      { event: { askIndex: lastIndex, followUpCount: 0 } },
+      { hasLastWeek: false, stateDone: false, active: 'event' },
     )
-    const text = textOf(buildTurnPrompt(state, 'mood', history, PERSONA))
-    expect(text).toContain('想聊细一点、正常聊，还是今天时间紧抓重点')
+    const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
+    expect(text).toContain('用 [换块] 时提醒他先在卡片上把状态打完分')
+    expect(text).toContain('心情、睡眠、运动、饮食')
+    expect(text).toContain('别替他往下问')
+  })
+
+  it('这一块的最后一道题也问完时，[换块] 才转成「提醒去打分」', () => {
+    const lastIndex = (dimensionScript('growth')?.mainQuestions.length ?? 1) - 1
+    const state = stateWith(
+      { reconcile: { complete: true }, event: { complete: true }, growth: { askIndex: lastIndex } },
+      { stateDone: false, active: 'growth' },
+    )
+    const text = textOf(buildTurnPrompt(state, 'growth', history, PERSONA))
+    expect(text).toContain('用 [换块] 时提醒他先在卡片上把状态打完分')
+    expect(text).toContain('心情、睡眠、运动、饮食')
   })
 
   it('主问题聊完之后转成自由聊：不再念题目，只剩 [追问]/[换块]', () => {
     const state = stateWith(
-      { mood: { complete: true }, event: { complete: true, freeTurns: 1 } },
+      { event: { complete: true, freeTurns: 1 } },
       { hasLastWeek: false, depth: 'mid', active: 'event' },
     )
     const user = userOf(buildTurnPrompt(state, 'event', history, PERSONA))
@@ -283,12 +348,13 @@ describe('提示词 · 一轮追问判断', () => {
     expect(user).toContain('[换块]')
     expect(user).not.toContain('[换题]')
     // 脚本里的下一条参考题目不该再被摆出来
-    expect(user).not.toContain('有没有本来打算做、结果没做成的事')
+    expect(user).not.toContain('有没有本来打算做、最后没动的事')
   })
 
   it('自由聊里所有块都聊完时，提示可以生成梳理', () => {
-    const state = finishAll(
-      setDepth(stateWith({ event: { freeTurns: 1 } }, { active: 'event' }), 'mid'),
+    const state = setDepth(
+      finishAll(stateWith({ event: { freeTurns: 1 } }, { active: 'event' })),
+      'mid',
     )
     const user = userOf(buildTurnPrompt(state, 'event', history, PERSONA))
     expect(user).toContain('生成这周的梳理')
@@ -316,6 +382,14 @@ describe('提示词 · 专属采访者', () => {
     expect(system.indexOf('必须遵守')).toBeGreaterThan(system.indexOf(rogue))
   })
 
+  it('协议里写死了「参考题目是要问到什么，不是要你念的句子」', () => {
+    const system = buildInterviewerSystem(PERSONA, { marker: true })
+    expect(system).toContain(
+      '参考题目给的是**要问到什么**，不是要你念的句子：每一句都用你自己的话问，别照抄示例，也别一周又一周用同一句。',
+    )
+    expect(system).toContain('要问的那件事他没答到，就换个说法再问一次，不要跳过。')
+  })
+
   it('不需要标记的那几轮，就不把标记规则写进去', () => {
     const plain = buildInterviewerSystem(PERSONA, { marker: false })
     expect(plain).not.toContain('[追问]')
@@ -329,31 +403,30 @@ describe('提示词 · 专属采访者', () => {
 })
 
 describe('提示词 · 生成与重新整理', () => {
-  it('生成时给出完整的 JSON 结构，包含第八栏 state', () => {
+  it('生成时给出完整的 JSON 结构：pending 后面是 growth，没有 state 这一项', () => {
     const text = textOf(buildSummarizePrompt([msg('user', '在改方案', 'event')]))
-    for (const key of [
-      'events',
-      'people',
-      'things',
-      'pending',
-      'highlights',
-      'nextFocus',
-      'nextFollowUps',
-      'state',
-    ]) {
+    for (const key of ['events', 'people', 'things', 'pending', 'growth', 'highlights', 'nextFocus', 'nextFollowUps']) {
       expect(text).toContain(key)
     }
-    for (const key of ['body', 'mood', 'focus', 'growth']) {
-      expect(text).toContain(key)
-    }
+    expect(text.indexOf('"pending"')).toBeLessThan(text.indexOf('"growth"'))
+    // 状态是界面上点的，模型不产出这一项
+    expect(text).not.toContain('"state"')
+    expect(text).not.toContain('"body"')
     expect(text).toContain('不要编造')
   })
 
-  it('状态的规矩写清楚了：一句话、不打分、没聊到就留空', () => {
-    const text = textOf(buildSummarizePrompt([msg('user', '这周睡得不好', 'mood')]))
-    expect(text).toContain('state 四项各一句话')
-    expect(text).toContain('不要写分数')
-    expect(text).toContain('哪一项这周没聊到就留空字符串')
+  it('成长这一栏的规矩写清楚了：是长见识，不是「做了什么」', () => {
+    const text = textOf(buildSummarizePrompt([msg('user', '看了本讲定价的书', 'growth')]))
+    expect(text).toContain('growth 是**这周长了什么**')
+    expect(text).toContain('看了什么、听了什么、跟谁聊出点东西')
+    expect(text).toContain('最多 3 条')
+    expect(text).toContain('不要写成「做了什么」')
+  })
+
+  it('状态的分数与备注不归模型管，别在 JSON 里编', () => {
+    const text = textOf(buildSummarizePrompt([msg('user', '这周睡得不好', 'event')]))
+    expect(text).toContain('状态（心情 / 睡眠 / 运动 / 饮食的分数与备注）**不由你产出**')
+    expect(text).toContain('别在 JSON 里编这一项')
   })
 
   it('对账的交代要带上「上周说好的」，做到的事不用单列', () => {
@@ -399,21 +472,35 @@ describe('提示词 · 生成与重新整理', () => {
     expect(textOf(buildSummarizePrompt([]))).toContain('什么都没说')
   })
 
-  it('重新整理时把手改过的结果（含 state）原样交给模型，并要求只能追加', () => {
+  it('重新整理把手改过的结果原样交给模型，并把状态排除在保留清单之外', () => {
     const current = {
       ...createEmptyResult(),
       events: ['我改过的这一条'],
-      state: { body: '睡得很差', mood: '', focus: '', growth: '' },
+      growth: ['我改过的成长一条'],
     }
     const text = textOf(
       buildRefinePrompt([msg('user', '在改方案', 'event')], current, '下周必须把报价发出去'),
     )
     expect(text).toContain('我改过的这一条')
+    expect(text).toContain('我改过的成长一条')
     expect(text).toContain('下周必须把报价发出去')
-    expect(text).toContain('"state"')
-    expect(text).toContain('睡得很差')
+    expect(text).toContain('"growth"')
     expect(text).toContain('原样保留')
     expect(text).toContain('追加')
+    // 保留清单点名的是这五栏 + 真正要重写的三项，状态不在其中
+    expect(text).toContain('events / people / things / pending / growth 这几栏**已经由用户亲手改过**')
+    expect(text).toContain('你真正要重写的是 highlights、nextFocus、nextFollowUps 这三项。')
+    expect(text).toContain('状态（四项分数与备注）不归你管，别动它。')
+  })
+
+  // 注：buildRefinePrompt 把当前结果整个 JSON.stringify 进提示词，所以 user 侧仍然
+  // 会看到 `"state": {...}` 这个键；「不归你管」靠的是文案约定而非省略字段。
+  it('当前结果里的 state 字段照原样带过去，同时文案声明别动它', () => {
+    const text = textOf(
+      buildRefinePrompt([msg('user', '在改方案', 'event')], createEmptyResult(), '补充一句'),
+    )
+    expect(text).toContain('"state"')
+    expect(text).toContain('状态（四项分数与备注）不归你管，别动它。')
   })
 })
 

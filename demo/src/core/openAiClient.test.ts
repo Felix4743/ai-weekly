@@ -3,7 +3,7 @@ import { AiError } from './aiError'
 import type { ChatRequest, ChatTransport } from './chatTransport'
 import { createInterview, openBlock } from './interview'
 import { createOpenAiClient } from './openAiClient'
-import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, SCRIPT } from './script'
+import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, SCRIPT, spoken } from './script'
 import {
   createEmptyResult,
   type AppConfig,
@@ -61,6 +61,8 @@ function withFollowUps(count: number, depth: Depth | null = null): InterviewStat
       ...base.blocks,
       event: { askIndex: 0, followUpCount: count, complete: false, freeTurns: 0 },
     },
+    // 状态卡与档位都已经过去了，这里只测区块内的一轮
+    stateDone: true,
     depth,
   }
 }
@@ -77,6 +79,7 @@ function inFreeChat(freeTurns = 1, followUpCount = FOLLOWUP_CAPS.deep): Intervie
       ...base.blocks,
       event: { ...base.blocks.event, complete: true, freeTurns, followUpCount },
     },
+    stateDone: true,
     depth: 'deep',
   }
 }
@@ -208,7 +211,7 @@ describe('真实模型客户端 · 专属采访者', () => {
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
     const eventQuestions = SCRIPT.find((d) => d.key === 'event')?.mainQuestions ?? []
-    const lastQuestion = eventQuestions[eventQuestions.length - 1]
+    const lastQuestion = spoken(eventQuestions[eventQuestions.length - 1])
     expect(lastQuestion.length).toBeGreaterThan(0)
     expect(turn.action).toBe('followup')
     expect(turn.message).not.toContain(lastQuestion)
@@ -240,6 +243,7 @@ describe('真实模型客户端 · 生成结果', () => {
     people: [{ name: '老王', note: '一直没拍板' }],
     things: ['买了个键盘'],
     pending: ['报销拖了两周没交'],
+    growth: ['开始用周复盘模板梳理自己'],
     highlights: ['方案难产是这周主线'],
     nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
     nextFollowUps: ['老王'],
@@ -252,6 +256,10 @@ describe('真实模型客户端 · 生成结果', () => {
     expect(r.events).toEqual(['改了三版方案'])
     expect(r.people[0].name).toBe('老王')
     expect(r.nextFocus).toHaveLength(3)
+    expect(r.growth).toEqual(['开始用周复盘模板梳理自己'])
+    // 状态分数不再是模型产的：模型不给 state，结果里也就没有分数
+    expect(r.state).toEqual({ note: '' })
+    expect('scores' in r.state).toBe(false)
   })
 
   it('生成时要求 JSON 模式', async () => {
@@ -259,6 +267,16 @@ describe('真实模型客户端 · 生成结果', () => {
     const ai = createOpenAiClient({ transport, config: CONFIG })
     await ai.summarize([])
     expect(seen[0].json).toBe(true)
+  })
+
+  it('生成提示词里要成长，不要状态分数', async () => {
+    const { transport, seen } = scriptedTransport([GOOD])
+    const ai = createOpenAiClient({ transport, config: CONFIG })
+    await ai.summarize([msg('user', '在改方案', 'event')])
+    const prompt = seen[0].messages.map((m) => m.content).join('\n')
+    expect(prompt).toContain('growth')
+    // 状态是开场那张打分卡的事，模型不产分数，也就不该被要求填 state
+    expect(prompt).not.toContain('"state"')
   })
 
   it('模型返回一坨垃圾时降级不崩，并说明原因', async () => {
@@ -285,6 +303,8 @@ describe('真实模型客户端 · 重新整理', () => {
     highlights: ['旧热点'],
     nextFocus: ['旧重点'],
     nextFollowUps: ['老王'],
+    // 状态分数是用户在打分卡上亲手点的，重新整理不该动它
+    state: { note: '我自己写的备注', scores: { mood: 4 } },
   }
 
   it('模型想改用户手改的清单也改不掉', async () => {
@@ -293,9 +313,11 @@ describe('真实模型客户端 · 重新整理', () => {
       people: [{ name: '老王', note: '模型改的备注' }],
       things: [],
       pending: [],
+      growth: ['模型给的成长'],
       highlights: ['新热点'],
       nextFocus: ['新重点'],
       nextFollowUps: ['小李'],
+      state: { note: '模型想改的备注', scores: { mood: 1 } },
     })
     const { transport } = scriptedTransport([modelSays])
     const ai = createOpenAiClient({ transport, config: CONFIG })
@@ -306,6 +328,10 @@ describe('真实模型客户端 · 重新整理', () => {
     expect(r.highlights).toEqual(['新热点'])
     expect(r.nextFocus).toEqual(['新重点'])
     expect(r.nextFollowUps).toEqual(['小李'])
+    // 成长是模型新增的一栏，合并进来
+    expect(r.growth).toEqual(['模型给的成长'])
+    // 分数和备注一个字都没变
+    expect(r.state).toEqual({ note: '我自己写的备注', scores: { mood: 4 } })
   })
 
   it('把补充说明和当前结果一起发给模型', async () => {

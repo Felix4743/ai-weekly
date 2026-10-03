@@ -4,9 +4,9 @@ import {
   blockProgress,
   coveragePercent,
   createInterview,
-  currentFollowUp,
   currentFollowUpCap,
-  currentQuestion,
+  currentFollowUpSpec,
+  currentQuestionSpec,
   finishAll,
   isAllComplete,
   isBlockComplete,
@@ -18,7 +18,7 @@ import {
   openBlock,
   questionsInBlock,
   setDepth,
-  stateKeyForAnswer,
+  setStateDone,
 } from './interview'
 import {
   CONTENT_BLOCKS,
@@ -28,6 +28,8 @@ import {
   TOTAL_MAIN_QUESTIONS,
   dimensionScript,
   followUpCap,
+  isContentBlock,
+  spoken,
 } from './script'
 import type { BlockProgress, Dimension, InterviewState, TurnAction } from './types'
 import { STATE_KEYS } from './types'
@@ -40,7 +42,7 @@ function runBlock(state: InterviewState, dim: Dimension, action: TurnAction) {
   let s = state
   let guard = 0
   while (!isBlockComplete(s, dim) && guard < 300) {
-    asked.push(currentQuestion(s, dim))
+    asked.push(spoken(currentQuestionSpec(s, dim)))
     s = nextStep(s, dim, action)
     guard += 1
   }
@@ -48,16 +50,17 @@ function runBlock(state: InterviewState, dim: Dimension, action: TurnAction) {
 }
 
 describe('分块采访状态机', () => {
-  it('初始时每个区块都是空的，没有选中任何一块，也还没定档', () => {
+  it('初始时每个区块都是空的，没选中任何一块，也还没交状态卡、没定档', () => {
     const s = createInterview()
     expect(s.active).toBeNull()
+    expect(s.stateDone).toBe(false)
     expect(s.depth).toBeNull()
     for (const d of SCRIPT) {
       expect(blockProgress(s, d.key)).toEqual(EMPTY)
     }
     expect(coveragePercent(s)).toBe(0)
     expect(isAllComplete(s)).toBe(false)
-    expect(nextStage(s)).toEqual({ kind: 'block', dim: 'mood' })
+    expect(nextStage(s)).toEqual({ kind: 'state' })
   })
 
   it('没有上一周记录时，把「上周对账」这一步直接标成已过', () => {
@@ -71,6 +74,8 @@ describe('分块采访状态机', () => {
     }
     // 跳过对账不等于已经聊过内容块，覆盖率仍然是 0
     expect(coveragePercent(without)).toBe(0)
+    // 状态卡还是要先交
+    expect(without.stateDone).toBe(false)
   })
 
   it('可以自己切到任意一块', () => {
@@ -82,15 +87,15 @@ describe('分块采访状态机', () => {
     s = openBlock(s, 'thing')
     expect(s.active).toBe('thing')
 
-    s = openBlock(s, 'mood')
-    expect(s.active).toBe('mood')
+    s = openBlock(s, 'growth')
+    expect(s.active).toBe('growth')
   })
 
   it('不追问时按顺序走完一个区块，并停在这一块', () => {
     const started = openBlock(createInterview(), 'event')
     const { state, asked } = runBlock(started, 'event', 'next')
 
-    expect(asked).toEqual(dimensionScript('event')?.mainQuestions ?? [])
+    expect(asked).toEqual((dimensionScript('event')?.mainQuestions ?? []).map(spoken))
     expect(isBlockComplete(state, 'event')).toBe(true)
     expect(state.active).toBe('event')
   })
@@ -115,34 +120,35 @@ describe('分块采访状态机', () => {
     expect(blockProgress(s, 'event').askIndex).toBe(1)
     expect(blockProgress(s, 'people').askIndex).toBe(0)
     expect(blockProgress(s, 'thing').askIndex).toBe(0)
-    expect(blockProgress(s, 'mood').askIndex).toBe(0)
+    expect(blockProgress(s, 'growth').askIndex).toBe(0)
   })
 
   it('区块的主问题聊完后，用户还想说就能接着说（自由聊）', () => {
-    const { state } = runBlock(openBlock(createInterview(), 'mood'), 'mood', 'next')
-    expect(isFreeChat(state, 'mood')).toBe(true)
+    const { state } = runBlock(openBlock(createInterview(), 'growth'), 'growth', 'next')
+    expect(isFreeChat(state, 'growth')).toBe(true)
 
     const before = coveragePercent(state)
-    const next = nextStep(state, 'mood', 'followup')
+    const next = nextStep(state, 'growth', 'followup')
 
     // 题目不再推进，覆盖率也不动 —— 该聊的已经聊过了
-    expect(blockProgress(next, 'mood').askIndex).toBe(blockProgress(state, 'mood').askIndex)
-    expect(blockProgress(next, 'mood').complete).toBe(true)
+    expect(blockProgress(next, 'growth').askIndex).toBe(blockProgress(state, 'growth').askIndex)
+    expect(blockProgress(next, 'growth').complete).toBe(true)
     expect(coveragePercent(next)).toBe(before)
 
     // 但这一句被记下来了，没人把他的话筒收走
-    expect(blockProgress(next, 'mood').freeTurns).toBe(1)
-    expect(blockProgress(next, 'mood').freeTurns).toBeGreaterThan(
-      blockProgress(state, 'mood').freeTurns,
+    expect(blockProgress(next, 'growth').freeTurns).toBe(1)
+    expect(blockProgress(next, 'growth').freeTurns).toBeGreaterThan(
+      blockProgress(state, 'growth').freeTurns,
     )
   })
 
-  it('每个内容块的主问题都不少于 4 个，每个区块都有追问池', () => {
+  it('每个内容块至少两道主问题，每个区块都有能念出来的追问', () => {
     for (const d of CONTENT_BLOCKS) {
-      expect(d.mainQuestions.length).toBeGreaterThanOrEqual(4)
+      expect(d.mainQuestions.length).toBeGreaterThanOrEqual(2)
     }
     for (const d of SCRIPT) {
       expect(d.followUps.length).toBeGreaterThan(0)
+      for (const spec of d.followUps) expect(spoken(spec).trim().length).toBeGreaterThan(0)
     }
   })
 
@@ -152,7 +158,9 @@ describe('分块采访状态机', () => {
 
     s = nextStep(s, 'thing', 'followup')
     expect(isFollowUpTurn(s, 'thing')).toBe(true)
-    expect(currentFollowUp(s, 'thing').length).toBeGreaterThan(0)
+    // 追问池按次数轮着取：追过一次之后取第二道
+    expect(currentFollowUpSpec(s, 'thing')).toBe(dimensionScript('thing')?.followUps[1])
+    expect(spoken(currentFollowUpSpec(s, 'thing')).trim().length).toBeGreaterThan(0)
   })
 
   it('[换块] 让当前块立即收尾，不再往后数题', () => {
@@ -162,18 +170,20 @@ describe('分块采访状态机', () => {
     s = nextStep(s, 'event', 'block')
     expect(isBlockComplete(s, 'event')).toBe(true)
     expect(blockProgress(s, 'event').followUpCount).toBe(0)
-    // 六个主问题一次性算完：6/18 ≈ 33%
+    // 六个主问题一次性算完，占覆盖率里的那一份
     expect(answeredInBlock(s, 'event')).toBe(questionsInBlock('event'))
-    expect(coveragePercent(s)).toBe(Math.round((questionsInBlock('event') / TOTAL_MAIN_QUESTIONS) * 100))
+    expect(coveragePercent(s)).toBe(
+      Math.round((questionsInBlock('event') / TOTAL_MAIN_QUESTIONS) * 100),
+    )
   })
 
   it('能算出覆盖率，并指出下一块该聊什么', () => {
     let s = createInterview()
-    expect(nextIncompleteBlock(s)).toBe('mood')
-
-    s = runBlock(openBlock(s, 'mood'), 'mood', 'next').state
-    expect(answeredInBlock(s, 'mood')).toBe(questionsInBlock('mood'))
     expect(nextIncompleteBlock(s)).toBe('event')
+
+    s = runBlock(openBlock(s, 'event'), 'event', 'next').state
+    expect(answeredInBlock(s, 'event')).toBe(questionsInBlock('event'))
+    expect(nextIncompleteBlock(s)).toBe('people')
     expect(isAllComplete(s)).toBe(false)
 
     for (const d of SCRIPT) s = runBlock(s, d.key, 'next').state
@@ -194,19 +204,33 @@ describe('分块采访状态机', () => {
     expect(dimensionScript('reconcile')?.kind).toBe('step')
   })
 
-  it('nextStage：状态没聊完就是状态，聊完还没定档就等用户挑', () => {
-    expect(nextStage(createInterview())).toEqual({ kind: 'block', dim: 'mood' })
+  it('nextStage：先交状态打分卡，再定档，然后才进第一块', () => {
+    expect(nextStage(createInterview())).toEqual({ kind: 'state' })
 
-    const moodDone = runBlock(createInterview(), 'mood', 'next').state
-    expect(nextStage(moodDone)).toEqual({ kind: 'depth' })
+    // 卡没交，先按档位按钮也不往下走
+    expect(nextStage(setDepth(createInterview(), 'mid'))).toEqual({ kind: 'state' })
+
+    const stateDone = setStateDone(createInterview())
+    expect(nextStage(stateDone)).toEqual({ kind: 'depth' })
+
+    // 卡交了但没挑档位：哪怕已经有一块聊完了，也停在 depth 等人挑
+    const growthDone = runBlock(stateDone, 'growth', 'next').state
+    expect(nextStage(growthDone)).toEqual({ kind: 'depth' })
+    expect(nextStage(setDepth(growthDone, 'mid'))).toEqual({ kind: 'block', dim: 'reconcile' })
   })
 
   it('nextStage：定档后按脚本顺序走，跳过没有的上周对账，全完就是 done', () => {
-    const moodDone = runBlock(createInterview(), 'mood', 'next').state
-    expect(nextStage(setDepth(moodDone, 'mid'))).toEqual({ kind: 'block', dim: 'reconcile' })
+    const ready = (s: InterviewState) => setDepth(setStateDone(s), 'mid')
 
-    const noLastWeek = runBlock(createInterview({ hasLastWeek: false }), 'mood', 'next').state
-    expect(nextStage(setDepth(noLastWeek, 'mid'))).toEqual({ kind: 'block', dim: 'event' })
+    expect(nextStage(ready(createInterview()))).toEqual({ kind: 'block', dim: 'reconcile' })
+    expect(nextStage(ready(createInterview({ hasLastWeek: false })))).toEqual({
+      kind: 'block',
+      dim: 'event',
+    })
+
+    // 一块聊完就轮到下一块
+    const reconcileDone = runBlock(createInterview(), 'reconcile', 'next').state
+    expect(nextStage(ready(reconcileDone))).toEqual({ kind: 'block', dim: 'event' })
 
     // 全部标成结束但一直没定档时，仍然会停在等档位这一步
     expect(nextStage(finishAll(createInterview()))).toEqual({ kind: 'depth' })
@@ -242,7 +266,7 @@ describe('分块采访状态机', () => {
       allAsked.push(...r.asked)
       s = r.state
     }
-    expect(allAsked).toEqual(SCRIPT.flatMap((d) => d.mainQuestions))
+    expect(allAsked).toEqual(SCRIPT.flatMap((d) => d.mainQuestions).map(spoken))
     // 四个内容块的题目正好是 TOTAL_MAIN_QUESTIONS，对账那一题不占进度
     expect(CONTENT_BLOCKS.flatMap((d) => d.mainQuestions)).toHaveLength(TOTAL_MAIN_QUESTIONS)
     expect(allAsked).toHaveLength(TOTAL_MAIN_QUESTIONS + 1)
@@ -270,19 +294,29 @@ describe('分块采访状态机', () => {
     expect(isAllComplete(s)).toBe(true)
     expect(s.active).toBe('event')
     expect(s.depth).toBe('deep')
+    // 直接生成也算把状态卡这一步翻过去了
+    expect(s.stateDone).toBe(true)
   })
 
   it('状态残缺或区块未知时不抛错', () => {
+    // 手工造的残缺状态：连 stateDone 都没有
     const wild = { active: null, blocks: {}, depth: null } as unknown as InterviewState
-    expect(() => currentQuestion(wild, 'event')).not.toThrow()
-    expect(currentQuestion(wild, 'event')).toBe(dimensionScript('event')?.mainQuestions[0])
-    expect(() => currentFollowUp(wild, 'event')).not.toThrow()
+    expect(() => nextStage(wild)).not.toThrow()
+    // 没交卡就先要卡，不会越过去瞎问
+    expect(nextStage(wild)).toEqual({ kind: 'state' })
+
+    const ready = { ...wild, stateDone: true, depth: 'mid' } as InterviewState
+    expect(nextStage(ready)).toEqual({ kind: 'block', dim: 'reconcile' })
+
+    expect(() => currentQuestionSpec(wild, 'event')).not.toThrow()
+    expect(currentQuestionSpec(wild, 'event')).toBe(dimensionScript('event')?.mainQuestions[0])
+    expect(() => currentFollowUpSpec(wild, 'event')).not.toThrow()
+    expect(currentFollowUpSpec(wild, 'event')).toBe(dimensionScript('event')?.followUps[0])
     expect(currentFollowUpCap(wild)).toBe(DEFAULT_FOLLOWUP_CAP)
-    expect(nextStage(wild)).toEqual({ kind: 'block', dim: 'mood' })
 
     const unknown = 'nope' as Dimension
-    expect(currentQuestion(wild, unknown)).toBe('')
-    expect(currentFollowUp(wild, unknown)).toBe('')
+    expect(currentQuestionSpec(wild, unknown)).toBeUndefined()
+    expect(currentFollowUpSpec(wild, unknown)).toBeUndefined()
     expect(nextStep(wild, unknown, 'followup')).toBe(wild)
     expect(questionsInBlock(unknown)).toBe(0)
     expect(answeredInBlock(wild, unknown)).toBe(0)
@@ -290,31 +324,36 @@ describe('分块采访状态机', () => {
 })
 
 /**
- * 状态那一段的四道题与四项评分一一对应，界面靠这个关系决定
- * 「这一条回答下面挂哪一排星」——错了就会把「精力」的分记到「情绪」上。
+ * 0.9.3 起「状态」不再是采访的一块：它是开场一张打分卡（四项点星 + 一行备注），
+ * 由界面点击产生，既不进 SCRIPT、也不占主问题、也不占 AI 轮次。
+ * 这一组用例钉的就是这条边界 —— 旧口径下 mood 是第五个区块，还带四道主问题。
  */
-describe('状态评分 · 回答与四项的对应', () => {
-  it('按顺序：身体 → 情绪 → 精力 → 心智', () => {
-    let s = createInterview()
-    const keys: (string | undefined)[] = []
-    for (let i = 0; i < 4; i++) {
-      keys.push(stateKeyForAnswer(s))
-      s = nextStep(s, 'mood', 'next')
+describe('状态打分卡 · 不再是采访的一块', () => {
+  it('mood 不是采访区块，脚本与内容块里都没有它', () => {
+    expect(SCRIPT.some((d) => (d.key as string) === 'mood')).toBe(false)
+    expect(CONTENT_BLOCKS.some((d) => (d.key as string) === 'mood')).toBe(false)
+    expect(isContentBlock('mood' as Dimension)).toBe(false)
+    expect(dimensionScript('mood' as Dimension)).toBeUndefined()
+  })
+
+  it('四排星是固定四项，跟脚本里的区块不是一回事', () => {
+    expect(STATE_KEYS).toEqual(['mood', 'sleep', 'sport', 'diet'])
+    for (const key of STATE_KEYS) {
+      expect(SCRIPT.some((d) => (d.key as string) === key)).toBe(false)
     }
-    expect(keys).toEqual([...STATE_KEYS])
   })
 
-  it('四道题都问完之后就没有对应项了（自由聊的话不归哪一项）', () => {
-    let s = createInterview()
-    for (let i = 0; i < 4; i++) s = nextStep(s, 'mood', 'next')
-    expect(isFreeChat(s, 'mood')).toBe(true)
-    expect(stateKeyForAnswer(s)).toBeUndefined()
-    // 再多说几句也还是 undefined
-    s = nextStep(s, 'mood', 'next')
-    expect(stateKeyForAnswer(s)).toBeUndefined()
+  it('没交卡之前一步都不往下走', () => {
+    expect(nextStage(createInterview())).toEqual({ kind: 'state' })
+    expect(nextStage(openBlock(createInterview(), 'event'))).toEqual({ kind: 'state' })
+    expect(nextStage(setDepth(createInterview(), 'deep'))).toEqual({ kind: 'state' })
   })
 
-  it('状态与其他区块的题数一致 —— 谁改短了都会在这里被拦住', () => {
-    expect(STATE_KEYS).toHaveLength(dimensionScript('mood')?.mainQuestions.length ?? 0)
+  it('交卡与定档各推进一格，重复交卡不白改状态', () => {
+    const s = setStateDone(createInterview())
+    expect(s.stateDone).toBe(true)
+    expect(setStateDone(s)).toBe(s)
+    expect(nextStage(s)).toEqual({ kind: 'depth' })
+    expect(nextStage(setDepth(s, 'fast'))).toEqual({ kind: 'block', dim: 'reconcile' })
   })
 })

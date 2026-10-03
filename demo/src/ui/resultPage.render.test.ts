@@ -270,7 +270,7 @@ describe('状态卡（0.9.3 起的四项打分 + 一行备注）', () => {
   })
 })
 
-describe('状态评分（0.9.2 的星星）', () => {
+describe('状态评分（结果页上的星星）', () => {
   it('四项各一排五颗星，没打分时写「未打分」，一颗都不亮', () => {
     const html = renderBody({ ...result, state: createEmptyState() })
     expect(html.match(/class="star"/g)).toHaveLength(20)
