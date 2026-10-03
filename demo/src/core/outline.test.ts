@@ -7,6 +7,7 @@ import {
   sectionDomId,
   targetScrollTop,
 } from './outline'
+import { attachState } from './stateScore'
 import { createEmptyResult, type WeeklyResult } from './types'
 
 function base(): WeeklyResult {
@@ -17,7 +18,9 @@ function base(): WeeklyResult {
     people: [{ name: '老王', note: '没拍板' }],
     things: ['换键盘'],
     pending: ['报销没交'],
-    state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
+    growth: ['读完《长日将尽》'],
+    // 状态：点过分的那两项各算一条，再写了备注又算一条
+    state: attachState({ mood: 4, sleep: 2 }, '这周一直悬着'),
     highlights: ['方案难产'],
     nextFocus: ['定稿', '联系老王', '留整块时间'],
     nextFollowUps: ['老王'],
@@ -25,7 +28,7 @@ function base(): WeeklyResult {
 }
 
 describe('结果页目录', () => {
-  it('按固定顺序列出七块，文案和页面标题一致', () => {
+  it('按固定顺序列出八块，文案和页面标题一致', () => {
     const outline = buildOutline(base())
     expect(outline.map((e) => e.key)).toEqual(SECTION_KEYS)
     expect(outline.map((e) => e.label)).toEqual([
@@ -34,49 +37,59 @@ describe('结果页目录', () => {
       '物品',
       '未办',
       '状态',
+      '成长',
       '本周主线',
       '下周计划',
     ])
   })
 
-  it('状态排在未办之后、本周主线之前', () => {
+  it('状态与成长排在未办之后、本周主线之前', () => {
     const keys = buildOutline(base()).map((e) => e.key)
     expect(keys.indexOf('state')).toBeGreaterThan(keys.indexOf('pending'))
-    expect(keys.indexOf('state')).toBeLessThan(keys.indexOf('highlights'))
+    expect(keys.indexOf('growth')).toBeGreaterThan(keys.indexOf('state'))
+    expect(keys.indexOf('growth')).toBeLessThan(keys.indexOf('highlights'))
   })
 
   it('每一块都带上自己的条数', () => {
     const outline = buildOutline(base())
-    expect(outline.map((e) => e.count)).toEqual([2, 1, 1, 1, 2, 1, 4])
+    expect(outline.map((e) => e.count)).toEqual([2, 1, 1, 1, 3, 1, 1, 4])
   })
 
   it('空结果时条数全是 0，但目录项一个都不少', () => {
     const outline = buildOutline(createEmptyResult())
-    expect(outline).toHaveLength(7)
+    expect(outline).toHaveLength(8)
     expect(outline.every((e) => e.count === 0)).toBe(true)
   })
 
-  it('状态四项都没写时算 0 条', () => {
+  it('状态一项分没点、备注也空着时算 0 条', () => {
     expect(countSection(createEmptyResult(), 'state')).toBe(0)
-    // 只填了空白也不算写了
+    // 备注只有空白也不算写了
     const blank = createEmptyResult()
-    blank.state = { body: ' ', mood: '\n', focus: '', growth: '   ' }
+    blank.state = { note: '  \n ' }
     expect(countSection(blank, 'state')).toBe(0)
   })
 
-  it('状态写了几项就算几条', () => {
+  it('状态点一项分算一条，再写备注就加一条', () => {
     const r = createEmptyResult()
-    r.state = { body: '睡得还行', mood: '有点烦', focus: '', growth: '' }
+    r.state = attachState({ mood: 4 }, '')
+    expect(countSection(r, 'state')).toBe(1)
+    r.state = attachState({ mood: 4 }, '这周一直悬着')
     expect(countSection(r, 'state')).toBe(2)
-    r.state.focus = '上午最好'
-    expect(countSection(r, 'state')).toBe(3)
   })
 
-  it('状态四项都写了就是 4 条', () => {
+  it('四项分全点、备注也写满，最多就是 5 条', () => {
     const r = createEmptyResult()
-    r.state = { body: '睡得还行', mood: '有点烦', focus: '上午最好', growth: '读了半本书' }
-    expect(countSection(r, 'state')).toBe(4)
-    expect(buildOutline(r).find((e) => e.key === 'state')?.count).toBe(4)
+    r.state = attachState({ mood: 5, sleep: 4, sport: 3, diet: 2 }, '还行')
+    expect(countSection(r, 'state')).toBe(5)
+    expect(buildOutline(r).find((e) => e.key === 'state')?.count).toBe(5)
+  })
+
+  it('成长那一栏按条数算', () => {
+    const r = createEmptyResult()
+    expect(countSection(r, 'growth')).toBe(0)
+    r.growth = ['读完《长日将尽》', '想通了报价为什么难谈']
+    expect(countSection(r, 'growth')).toBe(2)
+    expect(buildOutline(r).find((e) => e.key === 'growth')?.count).toBe(2)
   })
 
   it('下周计划把三件重点和要跟进的人一起算', () => {
@@ -94,6 +107,7 @@ describe('结果页目录', () => {
       'section-things',
       'section-pending',
       'section-state',
+      'section-growth',
       'section-highlights',
       'section-plan',
     ])
@@ -113,7 +127,7 @@ describe('滚动时判断当前是哪一块', () => {
   })
 
   it('某一块顶到目录栏下方时，就高亮它', () => {
-    // 物品（top 600）已经进到 620 以内，但悬着（top 900）还没有
+    // 物品（top 600）已经进到 620 以内，但未办（top 900）还没有
     const scrolled = offsets.map((o) => ({ ...o, top: o.top - 620 }))
     expect(activeSection(scrolled, { threshold: 60 })).toBe('things')
   })

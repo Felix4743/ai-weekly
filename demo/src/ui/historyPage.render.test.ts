@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { WeekEntry } from '../core/archive'
 import { stampText } from '../core/recency'
+import { attachState } from '../core/stateScore'
 import { createEmptyResult, type WeeklyResult } from '../core/types'
 import { addWeeks, monthLabel, monthOf, weekKeyOf, weekRangeText } from '../core/week'
 import { HistoryPage } from './HistoryPage'
@@ -79,22 +80,24 @@ describe('总览页渲染', () => {
     expect(html).toContain('全部记录')
   })
 
-  it('本周有记录时：详情里就是这一周的全文，五栏照旧默认收起', () => {
+  it('本周有记录时：详情里就是这一周的全文，六栏照旧默认收起', () => {
     const html = render([
       entry(THIS_WEEK, {
         highlights: ['这周基本在补债'],
         events: ['把积压的评审都过了'],
         pending: ['报销还没交'],
-        state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
+        growth: ['读完了《长日将尽》'],
+        state: attachState({ mood: 4, sleep: 2 }, '睡得还行'),
       }),
     ])
     expect(html).toContain('这周基本在补债')
     expect(html).toContain('事情 1')
-    // 五栏（含 0.9.1 新增的状态）都是收起态
-    expect(html.match(/aria-expanded="false"/g)).toHaveLength(5)
+    // 六栏（含 0.9.1 的状态、0.9.3 的成长）都是收起态
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(6)
     // 收起态：条目本身不出现在首屏 HTML 里
     expect(html).not.toContain('把积压的评审都过了')
     expect(html).not.toContain('报销还没交')
+    expect(html).not.toContain('读完了《长日将尽》')
     expect(html).not.toContain('睡得还行')
   })
 
@@ -140,31 +143,40 @@ describe('总览页渲染', () => {
   })
 })
 
-describe('总览页 · 状态卡（0.9.1 新增）', () => {
-  it('看存档时状态卡也在未办之后、本周主线之前', () => {
+describe('总览页 · 状态与成长卡（0.9.1 状态 / 0.9.3 成长）', () => {
+  it('看存档时状态卡在未办之后、成长之前、本周主线之前', () => {
     const html = render([entry(THIS_WEEK, { pending: ['报销还没交'] })])
     const pending = html.indexOf('id="section-pending"')
     const state = html.indexOf('id="section-state"')
+    const growth = html.indexOf('id="section-growth"')
     const highlights = html.indexOf('id="section-highlights"')
     expect(pending).toBeGreaterThanOrEqual(0)
     expect(pending).toBeLessThan(state)
-    expect(state).toBeLessThan(highlights)
+    expect(state).toBeLessThan(growth)
+    expect(growth).toBeLessThan(highlights)
   })
 
-  it('写了身体和情绪两项，卡上数字是 2', () => {
+  it('打了两项分、写了一条备注，卡上数字是 3', () => {
     const html = render([
       entry(THIS_WEEK, {
         highlights: ['有记录'],
-        state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
+        state: attachState({ mood: 4, sleep: 2 }, '睡得还行'),
       }),
     ])
     expect(html).toContain('状态')
-    expect(cardHtml(html, 'state', 'highlights')).toContain('card-count">2')
+    expect(cardHtml(html, 'state', 'growth')).toContain('card-count">3')
   })
 
-  it('四项都没写时不显示数字，卡片本身照旧在', () => {
+  it('一项分没点、备注也空着时不显示数字，卡片本身照旧在', () => {
     const html = render([entry(THIS_WEEK, { highlights: ['有记录'] })])
-    expect(cardHtml(html, 'state', 'highlights')).not.toContain('card-count')
+    expect(cardHtml(html, 'state', 'growth')).not.toContain('card-count')
     expect(html).toContain('id="section-state"')
+  })
+
+  it('看存档时成长卡也在，条数对得上', () => {
+    const html = render([
+      entry(THIS_WEEK, { highlights: ['有记录'], growth: ['读完《长日将尽》'] }),
+    ])
+    expect(cardHtml(html, 'growth', 'highlights')).toContain('card-count">1')
   })
 })

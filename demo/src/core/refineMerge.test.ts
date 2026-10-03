@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mergeRefined } from './refineMerge'
+import { attachState } from './stateScore'
 import { createEmptyResult, type WeeklyResult } from './types'
 
 function result(patch: Partial<WeeklyResult>): WeeklyResult {
@@ -8,11 +9,19 @@ function result(patch: Partial<WeeklyResult>): WeeklyResult {
 
 describe('重新整理的结果合并', () => {
   it('用户手改过的内容不会被模型改掉', () => {
-    const current = result({ events: ['我改过的第一条'], pending: ['我自己加的'] })
-    const fromModel = result({ events: ['模型想改成的样子'] })
+    const current = result({
+      events: ['我改过的第一条'],
+      pending: ['我自己加的'],
+      growth: ['我把成长那条也改了'],
+    })
+    const fromModel = result({
+      events: ['模型想改成的样子'],
+      growth: ['模型想改成的成长'],
+    })
     const merged = mergeRefined(current, fromModel)
     expect(merged.events[0]).toBe('我改过的第一条')
     expect(merged.pending).toEqual(['我自己加的'])
+    expect(merged.growth[0]).toBe('我把成长那条也改了')
   })
 
   it('模型的新内容只追加在末尾，不重排也不删条', () => {
@@ -29,6 +38,14 @@ describe('重新整理的结果合并', () => {
       result({ things: ['买了个键盘', '卖掉了旧手机'] }),
     )
     expect(merged.things).toEqual(['买了个键盘', '卖掉了旧手机'])
+  })
+
+  it('成长那一栏和别的清单一个规矩：旧的在前，新的追加', () => {
+    const merged = mergeRefined(
+      result({ growth: ['读完《长日将尽》'] }),
+      result({ growth: ['读完《长日将尽》', '想通了报价为什么难谈'] }),
+    )
+    expect(merged.growth).toEqual(['读完《长日将尽》', '想通了报价为什么难谈'])
   })
 
   it('只有空白差异的内容也算重复', () => {
@@ -83,26 +100,40 @@ describe('重新整理的结果合并', () => {
     expect(fromModel.events).toEqual(['B'])
   })
 
-  it('点过的星不会被「重新整理」洗掉', () => {
-    const current = result({ state: { body: '睡得还行', mood: '', focus: '', growth: '', scores: { body: 4 } } })
-    const fromModel = result({ state: { body: '模型重写的身体', mood: '', focus: '', growth: '' } })
+  it('状态整组照搬当前那份：点过的星和备注都不会被「重新整理」洗掉', () => {
+    const current = result({ state: attachState({ mood: 4, sleep: 2 }, '睡得还行') })
+    const fromModel = result({ state: attachState({ mood: 1 }, '模型重写的状态') })
     const merged = mergeRefined(current, fromModel)
-    // 文字按前几条例子的规矩来，分是界面点的，模型编不出来也不该丢
-    expect(merged.state.scores).toEqual({ body: 4 })
+    expect(merged.state).toEqual({ scores: { mood: 4, sleep: 2 }, note: '睡得还行' })
+  })
+
+  it('模型自己编的分进不来：界面没点就是没点', () => {
+    const merged = mergeRefined(
+      result({ state: attachState(undefined, '这周还行') }),
+      result({ state: attachState({ mood: 5, diet: 3 }, '') }),
+    )
+    expect(merged.state).toEqual({ note: '这周还行' })
+    expect('scores' in merged.state).toBe(false)
   })
 
   it('一直没点过星时，重新整理后也不多出一个空的 scores', () => {
     const merged = mergeRefined(
-      result({ state: { body: '睡得还行', mood: '', focus: '', growth: '' } }),
+      result({ state: attachState(undefined, '睡得还行') }),
       createEmptyResult(),
     )
     expect('scores' in merged.state).toBe(false)
+    expect(merged.state.note).toBe('睡得还行')
   })
 
   it('空清单一律给空数组，不留 undefined', () => {
     const merged = mergeRefined(createEmptyResult(), createEmptyResult())
     expect(merged.events).toEqual([])
     expect(merged.people).toEqual([])
+    expect(merged.things).toEqual([])
+    expect(merged.pending).toEqual([])
+    expect(merged.growth).toEqual([])
     expect(merged.highlights).toEqual([])
+    expect(merged.nextFocus).toEqual([])
+    expect(merged.nextFollowUps).toEqual([])
   })
 })

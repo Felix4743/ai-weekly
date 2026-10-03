@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { resultToMarkdown } from './resultText'
-import { createEmptyResult, type WeeklyResult } from './types'
+import { attachState } from './stateScore'
+import { createEmptyResult, createEmptyState, type WeeklyResult } from './types'
 
 const FULL: WeeklyResult = {
   // 从空结果起手再覆盖：以后再加一栏时，这里不用跟着一条条补
@@ -9,7 +10,8 @@ const FULL: WeeklyResult = {
   people: [{ name: '老王', note: '方案卡在他那儿没拍板' }],
   things: ['想换键盘，挑了半个月没定'],
   pending: ['报销拖了两周没交'],
-  state: { body: '睡得还行', mood: '这周一直悬着', focus: '上午最好', growth: '读了半本书' },
+  growth: ['把《长日将尽》读完了', '想通了报价为什么难谈'],
+  state: attachState({ mood: 2, sleep: 4 }, '这周一直悬着'),
   highlights: ['方案难产是这周主线'],
   nextFocus: ['推动方案定稿', '联系老王', '留出整块时间'],
   nextFollowUps: ['老王'],
@@ -17,19 +19,33 @@ const FULL: WeeklyResult = {
 
 const EMPTY: WeeklyResult = createEmptyResult()
 
+/** 「状态」那一节：从它的小标题切到下一节为止，只看它自己的内容 */
+function stateSection(md: string): string {
+  return md.split('## 状态')[1].split('## 本周主线')[0]
+}
+
 describe('结果导出为 Markdown', () => {
   it('包含全部章节标题', () => {
     const md = resultToMarkdown(FULL)
     expect(md).toContain('# 本周梳理')
     expect(md).toContain('## 本周清单')
+    expect(md).toContain('## 状态')
     expect(md).toContain('## 本周主线')
     expect(md).toContain('## 下周计划')
     expect(md).toContain('**事**')
     expect(md).toContain('**人**')
     expect(md).toContain('**未办**')
     expect(md).toContain('**物品**')
+    expect(md).toContain('**成长**')
     expect(md).toContain('**三件重点**')
     expect(md).toContain('**要跟进的人**')
+  })
+
+  it('成长一节排在物品之后、状态之前', () => {
+    const md = resultToMarkdown(FULL)
+    expect(md.indexOf('**物品**')).toBeLessThan(md.indexOf('**成长**'))
+    expect(md.indexOf('**成长**')).toBeLessThan(md.indexOf('## 状态'))
+    expect(md).toContain('- 把《长日将尽》读完了')
   })
 
   it('把人名和备注渲染成一条', () => {
@@ -67,6 +83,7 @@ describe('结果导出为 Markdown', () => {
       ...FULL.events,
       ...FULL.things,
       ...FULL.pending,
+      ...FULL.growth,
       ...FULL.highlights,
       ...FULL.nextFocus,
     ]) {
@@ -74,20 +91,47 @@ describe('结果导出为 Markdown', () => {
     }
   })
 
-  it('状态四项写进「状态」一节，一行一项', () => {
+  it('状态一节只列打过分的项，一行一项带分数', () => {
     const md = resultToMarkdown(FULL)
-    expect(md).toContain('## 状态')
-    expect(md).toContain('- 身体：睡得还行')
-    expect(md).toContain('- 情绪：这周一直悬着')
-    expect(md).toContain('- 精力：上午最好')
-    expect(md).toContain('- 心智：读了半本书')
+    const section = stateSection(md)
+    expect(section).toContain('- 心情：2 / 5')
+    expect(section).toContain('- 睡眠：4 / 5')
+    // 没打分的那两项不出现在稿子里
+    expect(section).not.toContain('运动')
+    expect(section).not.toContain('饮食')
   })
 
-  it('状态四项都没写时留一个占位，不留空标题', () => {
-    const md = resultToMarkdown({ ...FULL, state: { body: '', mood: '  ', focus: '', growth: '' } })
-    const section = md.split('## 状态')[1].split('## 本周主线')[0]
+  it('备注原文另起一段引用，前后空白被剪掉', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      state: attachState({ mood: 3 }, '  这周一直悬着  '),
+    })
+    expect(stateSection(md)).toContain('> 这周一直悬着')
+    // 引用段前留一个空行，粘到别处不会跟上面的列表黏成一条
+    expect(stateSection(md)).toContain('\n\n> 这周一直悬着')
+  })
+
+  it('一项分都没点就留一个占位，也不多出引用段', () => {
+    const md = resultToMarkdown({ ...FULL, state: createEmptyState() })
+    const section = stateSection(md)
     expect(section).toContain('- （无）')
-    expect(section).not.toContain('- 身体：')
+    expect(section).not.toContain('- 心情：')
+    expect(section).not.toContain('> ')
+  })
+
+  it('只点了分、没写备注：有分的行在，没有引用段', () => {
+    const md = resultToMarkdown({ ...FULL, state: attachState({ diet: 5 }, '') })
+    const section = stateSection(md)
+    expect(section).toContain('- 饮食：5 / 5')
+    expect(section).not.toContain('- （无）')
+    expect(section).not.toContain('> ')
+  })
+
+  it('只写了备注、一项分没点：占位和备注都在', () => {
+    const md = resultToMarkdown({ ...FULL, state: attachState(undefined, '这周还行') })
+    const section = stateSection(md)
+    expect(section).toContain('- （无）')
+    expect(section).toContain('> 这周还行')
   })
 
   it('老结果没有 state 这一栏也不崩，状态一节给占位', () => {
@@ -95,32 +139,7 @@ describe('结果导出为 Markdown', () => {
     delete legacy.state
     const md = resultToMarkdown(legacy as WeeklyResult)
     expect(md).toContain('## 状态')
-    expect(md.split('## 状态')[1].split('## 本周主线')[0]).toContain('- （无）')
-  })
-
-  it('点过星的那几项，分数跟在文字后面', () => {
-    const md = resultToMarkdown({
-      ...FULL,
-      state: { ...FULL.state, scores: { body: 4, growth: 5 } },
-    })
-    expect(md).toContain('- 身体：睡得还行（4 / 5）')
-    expect(md).toContain('- 心智：读了半本书（5 / 5）')
-    // 没打分的那两项不硬编一个分
-    expect(md).toContain('- 情绪：这周一直悬着')
-    expect(md).toContain('- 精力：上午最好')
-    expect(md).not.toContain('- 情绪：这周一直悬着（')
-  })
-
-  it('只点了星、一个字没写的那项也留在导出的稿子里', () => {
-    const md = resultToMarkdown({
-      ...FULL,
-      state: { body: '', mood: '  ', focus: '', growth: '', scores: { mood: 3 } },
-    })
-    const section = md.split('## 状态')[1].split('## 本周主线')[0]
-    expect(section).toContain('- 情绪：3 / 5')
-    expect(section).not.toContain('- （无）')
-    // 既没文字也没分的那几项不出现
-    expect(section).not.toContain('- 身体：')
+    expect(stateSection(md)).toContain('- （无）')
   })
 
   it('空结果用占位符而不是空白，保证可复制', () => {

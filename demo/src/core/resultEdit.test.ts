@@ -7,6 +7,7 @@ import {
   updateItem,
   updatePerson,
 } from './resultEdit'
+import { attachState } from './stateScore'
 import { createEmptyResult, type WeeklyResult } from './types'
 
 function base(): WeeklyResult {
@@ -17,7 +18,8 @@ function base(): WeeklyResult {
     people: [{ name: '老王', note: '没拍板' }],
     things: ['换键盘'],
     pending: ['报销没交'],
-    state: { body: '睡得还行', mood: '有点烦', focus: '', growth: '' },
+    growth: ['读完《长日将尽》'],
+    state: attachState({ mood: 4 }, '睡得还行'),
     highlights: ['方案难产'],
     nextFocus: ['定稿', '联系老王', '留整块时间'],
     nextFollowUps: ['老王'],
@@ -50,6 +52,19 @@ describe('结果页编辑操作', () => {
     expect(addItem(r, 'pending', '体检没预约').pending).toEqual(['报销没交', '体检没预约'])
     expect(addItem(r, 'pending', '   ')).toBe(r)
     expect(addItem(r, 'pending', '')).toBe(r)
+  })
+
+  it('成长一栏和别的清单一样：能加、能改、能删', () => {
+    const r = base()
+    expect(addItem(r, 'growth', '  想通了报价为什么难谈  ').growth).toEqual([
+      '读完《长日将尽》',
+      '想通了报价为什么难谈',
+    ])
+    expect(addItem(r, 'growth', '   ')).toBe(r)
+    expect(updateItem(r, 'growth', 0, '  读完《长日将尽》  ').growth[0]).toBe('读完《长日将尽》')
+    expect(removeItem(r, 'growth', 0).growth).toEqual([])
+    expect(updateItem(r, 'growth', 9, 'x')).toBe(r)
+    expect(removeItem(r, 'growth', 9)).toBe(r)
   })
 
   it('修改人际条目', () => {
@@ -93,7 +108,9 @@ describe('结果页编辑操作', () => {
   it('清单的增删改都不会碰状态那一栏', () => {
     const r = base()
     expect(addItem(r, 'things', '处理旧手机').state).toEqual(r.state)
+    expect(addItem(r, 'growth', '想通了一件事').state).toEqual(r.state)
     expect(removeItem(r, 'events', 0).state).toEqual(r.state)
+    expect(removeItem(r, 'growth', 0).state).toEqual(r.state)
     expect(updateItem(r, 'highlights', 0, '改一句').state).toEqual(r.state)
     expect(updatePerson(r, 0, { note: '已经拍板了' }).state).toEqual(r.state)
     expect(removePerson(r, 0).state).toEqual(r.state)
