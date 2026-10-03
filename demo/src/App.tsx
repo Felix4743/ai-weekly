@@ -10,10 +10,11 @@ import {
   nextStep,
   openBlock,
   setDepth,
-  stateKeyForAnswer,
+  setStateDone,
 } from './core/interview'
+import { hasWeekContent, mergeWeekResult, recapLines } from './core/mergeWeek'
 import { sampleAnswer } from './core/mockAi'
-import { attachScores, withScore } from './core/stateScore'
+import { attachState, withScore } from './core/stateScore'
 import { stripMarkerForDisplay } from './core/turn'
 import {
   createDefaultConfig,
@@ -92,8 +93,10 @@ export default function App() {
   const [resultWeek, setResultWeek] = useState<WeekKey>(() => weekKeyOf(new Date()))
   /** 从哪一页点进设置的：回去时要还给他，改设置不该等于重开 */
   const [cameFrom, setCameFrom] = useState<Page | null>(null)
-  /** 状态四项的分数：采访里点出来的，出结果时贴到结果上 */
+  /** 状态四项的分数：采访里那张卡上点出来的，出结果时贴到结果上 */
   const [stateScores, setStateScores] = useState<StateScores>({})
+  /** 状态卡上那一行备注（旧档的四行文字也会并到这里） */
+  const [stateNote, setStateNote] = useState('')
 
   // 填了 Key 就是真模型，没填就用假 AI 走通流程
   const { client: ai, mode } = useMemo(
@@ -107,6 +110,11 @@ export default function App() {
   const archiveRef = useRef<WeekEntry[]>(archive)
   const resultWeekRef = useRef<WeekKey>(resultWeek)
   const stateScoresRef = useRef<StateScores>(stateScores)
+  const stateNoteRef = useRef(stateNote)
+  /** 这一轮是不是「接着这周上一次补」：生成时要把两份并成一份 */
+  const resumeRef = useRef(false)
+  /** 这一轮是不是「从头再聊一遍」：开场不复述这周已记下的那些 */
+  const freshRef = useRef(false)
   const busyRef = useRef(false)
   const streamRef = useRef('')
   const flushTimer = useRef<number | null>(null)
@@ -137,6 +145,11 @@ export default function App() {
     setStateScores(next)
   }, [])
 
+  const commitStateNote = useCallback((next: string) => {
+    stateNoteRef.current = next
+    setStateNote(next)
+  }, [])
+
   /**
    * 结果一改就落两处：最近一次会话（刷新不丢）+ 它所属那一周的归档（总览看得到）。
    * 两道落盘都在这儿，是因为「结果变了」只有一个入口，散出去必然漏一处。
@@ -159,21 +172,44 @@ export default function App() {
     [commitArchive],
   )
 
-  /* ---------------- 上周的上下文 ---------------- */
+  /** 状态卡上的每一次点击与每一笔备注都走这里：分数与备注永远一起改、一起落盘 */
+  const commitStateCard = useCallback(
+    (scores: StateScores, note: string) => {
+      commitScores(scores)
+      commitStateNote(note)
+      const current = resultRef.current
+      if (current) commitResult({ ...current, state: attachState(scores, note) })
+    },
+    [commitResult, commitScores, commitStateNote],
+  )
+
+  /* ---------------- 上周与本周的上下文 ---------------- */
 
   /**
-   * 上一周定下来的东西（下周重点 + 要跟进的人）。
-   *
-   * 「上周对账」要先知道上周说过什么才有据可依 —— 这一份上下文同时决定两件事：
-   * 提示词里复述什么，以及这一步要不要跳过（上一周没有记录就没有对账）。
+   * 上一次梳理留下的东西，分两份：
+   * - `lastWeek`：上一周定下的重点与要跟进的人 —— 「上周对账」靠它，也决定这一步要不要跳过；
+   * - `thisWeek`：**这一周已经记下的内容** —— 一周里聊第二次时，开场先把它复述一句，
+   *   再问他今天补什么，别把聊过的再问一遍。
    */
   const interviewContext = useCallback((): InterviewContext => {
-    const lastKey = addWeeks(weekKeyOf(new Date()), -1)
-    const entry = archiveRef.current.find((e) => e.week === lastKey)
-    if (!entry) return {}
-    const { nextFocus, nextFollowUps } = entry.result
-    if (nextFocus.length === 0 && nextFollowUps.length === 0) return {}
-    return { lastWeek: { focus: nextFocus, followUps: nextFollowUps }, lastWeekKey: lastKey }
+    const thisKey = weekKeyOf(new Date())
+    const lastKey = addWeeks(thisKey, -1)
+    const ctx: InterviewContext = {}
+
+    const last = archiveRef.current.find((e) => e.week === lastKey)
+    if (last) {
+      const { nextFocus, nextFollowUps } = last.result
+      if (nextFocus.length > 0 || nextFollowUps.length > 0) {
+        ctx.lastWeek = { focus: nextFocus, followUps: nextFollowUps }
+        ctx.lastWeekKey = lastKey
+      }
+    }
+
+    const mine = archiveRef.current.find((e) => e.week === thisKey)
+    if (!freshRef.current && mine && hasWeekContent(mine.result)) {
+      ctx.thisWeek = { savedAt: mine.savedAt, lines: recapLines(mine.result) }
+    }
+    return ctx
   }, [])
 
   /* ---------------- 流式累积 ---------------- */
@@ -199,36 +235,49 @@ export default function App() {
 
   /* ---------------- 流程 ---------------- */
 
-  const startInterview = useCallback(async () => {
-    if (busyRef.current) return
-    busyRef.current = true
-    resetStream()
-    commitMessages([])
-    // 每一次梳理都从「状态」开始；上一周没记录的话，「上周对账」这一步直接跳过
-    const ctx = interviewContext()
-    const fresh = openBlock(createInterview({ hasLastWeek: Boolean(ctx.lastWeek) }), 'mood')
-    commitInterview(fresh)
-    resultRef.current = null
-    setResult(null)
-    setRestored(false)
-    // 新的一轮：上一轮点过的星不能跟着过来
-    commitScores({})
-    // 新的一轮从今天算起；上一份结果属于哪一周，到这里为止
-    commitResultWeek(weekKeyOf(new Date()))
-    setPage('chat')
-    setTyping(true)
-    try {
-      const text = await ai.nextMessage(fresh, 'mood', [], pushDelta, ctx)
-      commitMessages([aiMessage(text, 'mood')])
-      setError(null)
-    } catch (err) {
-      setError(describeError(err))
-    } finally {
+  /**
+   * 开一轮梳理。
+   *
+   * 默认是「接着这周上次补」：这一周要是已经记过东西，状态卡预填上次的分数与备注，
+   * 生成时两份并成一份（见 mergeWeek.ts）。`fresh: true` 是「从头再聊一遍」，
+   * 不看这周已有的记录，生成时把它换掉。
+   *
+   * 流程从**状态卡**开始 —— 先在卡片上打完分，再问他要聊到多细。
+   * 所以这里不请 AI 说话：第一句提问要等定完档、开第一块的时候。
+   */
+  const startInterview = useCallback(
+    async (options: { fresh?: boolean } = {}) => {
+      if (busyRef.current) return
       resetStream()
-      setTyping(false)
-      busyRef.current = false
-    }
-  }, [ai, commitInterview, commitMessages, commitResultWeek, commitScores, interviewContext, pushDelta, resetStream])
+      commitMessages([])
+      const ctx = interviewContext()
+      const thisKey = weekKeyOf(new Date())
+      const mine = options.fresh ? undefined : archiveRef.current.find((e) => e.week === thisKey)
+
+      resumeRef.current = Boolean(mine && hasWeekContent(mine.result))
+      // 「从头再聊一遍」连开场那句复述也不要 —— 他要的就是别看这周的旧记录
+      freshRef.current = Boolean(options.fresh)
+      commitScores(mine?.result.state.scores ?? {})
+      commitStateNote(mine?.result.state.note ?? '')
+
+      commitInterview(createInterview({ hasLastWeek: Boolean(ctx.lastWeek) }))
+      resultRef.current = null
+      setResult(null)
+      setRestored(false)
+      // 这一轮从今天算起；上一份结果属于哪一周，到这里为止
+      commitResultWeek(thisKey)
+      setPage('chat')
+    },
+    [
+      commitInterview,
+      commitMessages,
+      commitResultWeek,
+      commitScores,
+      commitStateNote,
+      interviewContext,
+      resetStream,
+    ],
+  )
 
   // 首次挂载：若已配置过则直接进入对话
   const bootedRef = useRef(false)
@@ -244,11 +293,20 @@ export default function App() {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
     try {
       const r = await ai.summarize(messagesRef.current, interviewContext())
-      // 分数以界面上真实点过的为准：模型压根没让它打分，它自己编的也在这儿被盖掉
-      const merged: WeeklyResult = { ...r, state: attachScores(r.state, stateScoresRef.current) }
+      const week = weekKeyOf(new Date())
+      // 一周里聊第二次：这一轮的内容并进这周已经记下的那一份，别把上次那份顶掉
+      const previous = resumeRef.current
+        ? (archiveRef.current.find((e) => e.week === week)?.result ?? null)
+        : null
+      const merged = mergeWeekResult(r, previous)
+      // 分数与备注以界面上真实的点击 / 手写为准：模型压根不产这一项，它自己编的也在这儿被盖掉
+      const withState: WeeklyResult = {
+        ...merged,
+        state: attachState(stateScoresRef.current, stateNoteRef.current),
+      }
       // 生成的那一刻定下它属于哪一周 —— 之后再编辑、重新整理都跟着这一周走
-      commitResultWeek(weekKeyOf(new Date()))
-      commitResult(merged)
+      commitResultWeek(week)
+      commitResult(withState)
       setError(null)
       setPage('result')
     } catch (err) {
@@ -262,6 +320,8 @@ export default function App() {
   const handleOpenBlock = useCallback(
     async (dim: Dimension) => {
       if (busyRef.current) return
+      // 状态卡还没交：先打完分、定了档，才轮到他挑块
+      if (!interviewRef.current.stateDone) return
       if (interviewRef.current.active === dim) return
 
       const opened = openBlock(interviewRef.current, dim)
@@ -299,13 +359,9 @@ export default function App() {
       setTyping(true)
       resetStream()
 
-      // 状态那一段的回答，按「这道题是四项里的哪一项」挂上键：
-      // 界面据此在这一条下面放一排星（问完一段点一次）
-      const stateKey = dim === 'mood' ? stateKeyForAnswer(interviewRef.current) : undefined
-
       commitMessages([
         ...messagesRef.current,
-        { id: nextId('u'), role: 'user', text, dimension: dim, stateKey, at: Date.now() },
+        { id: nextId('u'), role: 'user', text, dimension: dim, at: Date.now() },
       ])
 
       try {
@@ -381,20 +437,30 @@ export default function App() {
     [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
+  /** 用户交了状态卡：流程走到「定档」，接下来交给他点按钮 */
+  const handleStateDone = useCallback(() => {
+    if (busyRef.current) return
+    commitInterview(setStateDone(interviewRef.current))
+  }, [commitInterview])
+
   /**
-   * 用户在状态那段点了星。
+   * 用户在状态卡上点了星 / 写了备注。
    *
-   * 改的是「这一轮采访」的分数；要是结果已经出来了（从结果页又退回采访接着聊），
+   * 改的是「这一轮采访」的那张卡；要是结果已经出来了（从结果页又退回采访接着聊），
    * 同一笔改动也得落到那份结果上，否则两边会不一致。
    */
   const handleScoreState = useCallback(
     (key: StateKey, value: number | undefined) => {
-      const next = withScore(stateScoresRef.current, key, value)
-      commitScores(next)
-      const current = resultRef.current
-      if (current) commitResult({ ...current, state: attachScores(current.state, next) })
+      commitStateCard(withScore(stateScoresRef.current, key, value), stateNoteRef.current)
     },
-    [commitResult, commitScores],
+    [commitStateCard],
+  )
+
+  const handleNoteChange = useCallback(
+    (text: string) => {
+      commitStateCard(stateScoresRef.current, text)
+    },
+    [commitStateCard],
   )
 
   const handleGenerate = useCallback(async () => {
@@ -469,14 +535,20 @@ export default function App() {
     // 恢复的是哪一周的结果，就接着算哪一周：否则改两笔就会串到本周名下
     commitResultWeek(saved.week)
     commitMessages(saved.messages)
-    // 上次点过的星也在那份结果里：恢复出来，采访里接着改才对得上
+    // 上次点过的星与写过的备注也在那份结果里：恢复出来，采访里接着改才对得上
     commitScores(saved.result.state?.scores ?? {})
+    commitStateNote(saved.result.state?.note ?? '')
     setRestored(true)
     setPage('result')
-  }, [commitMessages, commitResultWeek, commitScores])
+  }, [commitMessages, commitResultWeek, commitScores, commitStateNote])
 
   const handleRestart = useCallback(() => {
     void startInterview()
+  }, [startInterview])
+
+  /** 从头再聊一遍：这周已经记下的那些不看、不并，生成时换掉 */
+  const handleStartFresh = useCallback(() => {
+    void startInterview({ fresh: true })
   }, [startInterview])
 
   const activeDim = interview.active
@@ -542,10 +614,14 @@ export default function App() {
           sampleText={sampleText}
           hasAnyAnswer={hasAnyAnswer}
           stateScores={stateScores}
+          stateNote={stateNote}
           onOpenBlock={handleOpenBlock}
           onSend={handleSend}
           onPickDepth={handlePickDepth}
           onScoreState={handleScoreState}
+          onNoteChange={handleNoteChange}
+          onStateDone={handleStateDone}
+          onStartFresh={handleStartFresh}
           onGenerate={handleGenerate}
         />
       )}

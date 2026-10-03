@@ -79,8 +79,8 @@ export function normalizeSession(raw: unknown): SavedSession | null {
   const savedAt = Number.isFinite(parsed.savedAt) ? (parsed.savedAt as number) : Date.now()
   return {
     messages: parsed.messages,
-    // 过一遍 coerceResult：0.9.1 之前的会话没有「状态」这一栏，这里补成四个空串，
-    // 免得界面读到 undefined 崩掉；正常内容一个字节不动。
+    // 过一遍 coerceResult：0.9.3 之前的会话没有「成长」这一栏、状态也是四行文字，
+    // 这里补成空列表 / 并成一行备注，免得界面读到 undefined 崩掉；正常内容一个字节不动。
     result: coerceResult(parsed.result) ?? parsed.result,
     savedAt,
     // M7 之前存的会话没有 week：按保存时间推一个，总比算到本周头上强

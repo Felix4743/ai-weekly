@@ -5,6 +5,7 @@ export type ListKey =
   | 'events'
   | 'things'
   | 'pending'
+  | 'growth'
   | 'highlights'
   | 'nextFocus'
   | 'nextFollowUps'

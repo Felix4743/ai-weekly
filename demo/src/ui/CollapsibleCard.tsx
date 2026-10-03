@@ -9,10 +9,17 @@ import { sectionDomId, type SectionKey } from '../core/outline'
  * 各写一份迟早会长歪。
  */
 
-/** 收起时整块只剩两个字的那五栏 */
-export type CollapsibleKey = 'events' | 'people' | 'things' | 'pending' | 'state'
+/** 收起时整块只剩两个字的那六栏 */
+export type CollapsibleKey = 'events' | 'people' | 'things' | 'pending' | 'state' | 'growth'
 
-export const COLLAPSIBLE_KEYS: CollapsibleKey[] = ['events', 'people', 'things', 'pending', 'state']
+export const COLLAPSIBLE_KEYS: CollapsibleKey[] = [
+  'events',
+  'people',
+  'things',
+  'pending',
+  'state',
+  'growth',
+]
 
 /** 默认全部收起：进来先看见目录、主线和下周计划，要看某一栏再点开 */
 export const ALL_COLLAPSED: Record<CollapsibleKey, boolean> = {
@@ -21,6 +28,7 @@ export const ALL_COLLAPSED: Record<CollapsibleKey, boolean> = {
   things: true,
   pending: true,
   state: true,
+  growth: true,
 }
 
 export function isCollapsible(key: SectionKey): key is CollapsibleKey {

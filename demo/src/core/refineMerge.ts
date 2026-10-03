@@ -1,5 +1,5 @@
 import type { PersonNote, WeeklyResult } from './types'
-import { attachScores } from './stateScore'
+import { attachState } from './stateScore'
 
 /**
  * 「重新整理」的结果合并。
@@ -73,20 +73,12 @@ export function mergeRefined(current: WeeklyResult, fromModel: WeeklyResult): We
     people: mergePeople(current.people, fromModel.people),
     things: mergeStrings(current.things, fromModel.things),
     pending: mergeStrings(current.pending, fromModel.pending),
+    growth: mergeStrings(current.growth, fromModel.growth),
     highlights: preferIncoming(current.highlights, fromModel.highlights),
     nextFocus: preferIncoming(current.nextFocus, fromModel.nextFocus),
     nextFollowUps: preferIncoming(current.nextFollowUps, fromModel.nextFollowUps),
-    // 状态是用户手改过的四项文字：只补空缺，不覆盖他写过的；
-    // 分数是用户点出来的，模型压根不该有，所以整组照搬当前的
-    // （不带上这一句，「重新整理」一次就把星星全洗掉了）
-    state: attachScores(
-      {
-        body: current.state.body.trim() || fromModel.state.body,
-        mood: current.state.mood.trim() || fromModel.state.mood,
-        focus: current.state.focus.trim() || fromModel.state.focus,
-        growth: current.state.growth.trim() || fromModel.state.growth,
-      },
-      current.state.scores,
-    ),
+    // 状态整组照搬当前的：备注是用户自己写的，分数是他在界面上点出来的，
+    // 模型两边都不该动（不带上这一句，「重新整理」一次就把星星全洗掉了）
+    state: attachState(current.state.scores, current.state.note),
   }
 }

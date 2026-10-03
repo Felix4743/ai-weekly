@@ -1,7 +1,7 @@
 import type { ChatMessagePayload } from './chatTransport'
 import {
   blockProgress,
-  currentQuestion,
+  currentQuestionSpec,
   nextStage,
   nextStep,
 } from './interview'
@@ -78,8 +78,25 @@ function depthLabel(state: InterviewState): string {
 /** 当前档位的节奏要求，写进提问与开场的提示词 */
 function depthGuidance(state: InterviewState): string {
   const spec = depthSpec(state.depth)
-  if (!spec) return '（档位还没定：先聊状态，聊完再问对方要深度、中度还是快速复盘。）'
+  if (!spec) return '（档位还没定：先问他要深度、中度还是快速复盘。）'
   return `本次是**${spec.label}**，大约 ${spec.minutes} 分钟。${spec.guidance}`
+}
+
+/**
+ * 本周已经聊过一次（0.9.3 的「接着上次补」）。
+ *
+ * 开场要把已经记下的复述一遍，再问今天补点什么 —— 这是用户定的：
+ * 一周复盘两次不该把上一次顶掉，第二次是往上加。
+ */
+function thisWeekBlock(ctx: InterviewContext): string {
+  const t = ctx.thisWeek
+  if (!t || t.lines.length === 0) return ''
+  return [
+    '这周他已经聊过一次了，今天是接着上次补（不是从头再来）：',
+    ...t.lines.map((l) => `- ${l}`),
+    '开场先把他这周已经记下的用一句话复述出来（不要改写、不要编造、不要评价），',
+    '然后问一句今天想补点什么 —— 别把已经聊过的再问一遍。',
+  ].join('\n')
 }
 
 /** 上周的记录，写成对账那一步能直接念的原文 */
@@ -93,18 +110,30 @@ function lastWeekBlock(ctx: InterviewContext): string {
   return lines.join('\n')
 }
 
+/**
+ * 区块的参考题目：**只给要问到什么 + 示例，不给成品句子**。
+ *
+ * 0.9.3 起措辞交给模型（用户嫌一周又一周同一句「跟个人机一样」），
+ * 客户端只管顺序与覆盖面 —— 所以这里写的是目标，不是台词。
+ */
 function questionList(dim: Dimension): string {
   const script = dimensionScript(dim)
   if (!script) return ''
-  return script.mainQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')
+  return script.mainQuestions
+    .map((q, i) => `${i + 1}. 要问到：${q.intent}（示例：「${q.examples.join('」「')}」）`)
+    .join('\n')
 }
 
 function poolBlock(dim: Dimension): string {
   const script = dimensionScript(dim)
   if (!script) return ''
-  const lines = [`追问池（说到才追，不硬问）：${script.followUps.join(' / ')}`]
+  const lines = [
+    `追问的方向（说到才追，不硬问，用你自己的话问）：${script.followUps.map((f) => f.intent).join(' / ')}`,
+  ]
   if (script.optionalQuestions?.length) {
-    lines.push(`聊开了才问（没聊到就不提）：${script.optionalQuestions.join(' / ')}`)
+    lines.push(
+      `聊开了才问（没聊到就不提）：${script.optionalQuestions.map((q) => q.intent).join(' / ')}`,
+    )
   }
   return lines.join('\n')
 }
@@ -121,6 +150,7 @@ export function buildOpeningPrompt(
   if (!script) return []
 
   const isVeryFirst = history.filter((m) => m.role === 'ai').length === 0
+  const thisWeek = thisWeekBlock(ctx)
 
   const head = [`现在要开始聊「${script.label}」这一块。这一块关心的是：${script.hint}。`]
 
@@ -128,13 +158,23 @@ export function buildOpeningPrompt(
     const week = lastWeekBlock(ctx)
     head.push('', week || '（没有取到上周的内容，按一般问法问就行）')
   } else {
-    head.push('', `参考题目（仅供参考，不是必须逐条念）：`, questionList(dim), '', poolBlock(dim))
+    head.push(
+      '',
+      `参考题目（给的是**要问到什么**，不是要你念的句子；用你自己的话说）：`,
+      questionList(dim),
+      '',
+      poolBlock(dim),
+    )
   }
+
+  if (thisWeek) head.push('', thisWeek)
 
   head.push('', `整体进度：${formatProgress(state)}`, depthGuidance(state), '')
   head.push(
     isVeryFirst
-      ? '这是整场采访的第一个问题。请先用半句话打个招呼，然后问出第 1 个问题。'
+      ? thisWeek
+        ? '这是接着上次补的第一句话：先用半句话打个招呼，再按上面说的把他这周已经记下的复述一句，然后问今天想补点什么。'
+        : '这是整场采访的第一个问题。请先用半句话打个招呼，然后问出第 1 个问题。'
       : dim === 'reconcile'
         ? '请把上面上周的内容用他当时的说法复述一遍（不要改写、不要编造），然后问：实际落到了哪儿。'
         : '请用一句自然的话过渡过来，然后问出第 1 个问题。',
@@ -142,7 +182,7 @@ export function buildOpeningPrompt(
   head.push(
     '',
     '要求：一次只说一句话（问一到三个小问题也行，别堆成一长串），不要列清单、不要小标题、不要复述区块名称；' +
-      '不要评价他做得怎么样，也不要替他说结论。',
+      '不要评价他做得怎么样，也不要替他说结论；**不要照抄示例问法**，那是意思不是台词。',
   )
 
   return [
@@ -166,12 +206,14 @@ export function buildClosingPrompt(
   const tail =
     remaining.length === 0
       ? '四个区块都聊过了，告诉他可以生成这周的梳理了。'
-      : next.kind === 'depth'
-        ? '自然地提一句：接着可以聊后面几块，先问一句「想聊细一点、正常聊，还是今天时间紧抓重点？」'
-        : next.kind === 'block'
-          ? `自然地提一下可以接着聊「${nextLabel}」，` +
-            '但**只提块的名称，不要替那一块把问题先问了** —— 他切过去之后会正式问一遍，先问就是重复。'
-          : '自然地提一句可以接着聊。'
+      : next.kind === 'state'
+        ? '提醒他先在卡片上把状态打完分（心情、睡眠、运动、饮食），打完再往下聊。'
+        : next.kind === 'depth'
+          ? '自然地提一句：接着可以聊后面几块，先问一句「想聊细一点、正常聊，还是今天时间紧抓重点？」'
+          : next.kind === 'block'
+            ? `自然地提一下可以接着聊「${nextLabel}」，` +
+              '但**只提块的名称，不要替那一块把问题先问了** —— 他切过去之后会正式问一遍，先问就是重复。'
+            : '自然地提一句可以接着聊。'
 
   return [
     { role: 'system', content: buildInterviewerSystem(persona, { marker: false }) },
@@ -238,7 +280,7 @@ export function buildTurnPrompt(
     ]
   }
 
-  const question = currentQuestion(state, dim)
+  const question = currentQuestionSpec(state, dim)
   const cap = followUpCap(state.depth)
   const atCap = progress.followUpCount >= cap
 
@@ -246,7 +288,7 @@ export function buildTurnPrompt(
   const advanced = nextStep(state, dim, 'next')
   const advancedProgress = blockProgress(advanced, dim)
   const blockWillFinish = advancedProgress.complete
-  const nextQuestion = blockWillFinish ? '' : currentQuestion(advanced, dim)
+  const nextQuestion = blockWillFinish ? undefined : currentQuestionSpec(advanced, dim)
 
   const stageAfterBlock = nextStage(nextStep(state, dim, 'block'))
   const blockTail =
@@ -254,11 +296,15 @@ export function buildTurnPrompt(
       ? '用 [换块] 时，给一句自然的收尾，并告诉他可以生成这周的梳理了。'
       : stageAfterBlock.kind === 'depth'
         ? '用 [换块] 时，这句话末尾要补一句：「想聊细一点、正常聊，还是今天时间紧抓重点？」然后就停住，等他挑，不要自己替他挑。'
-        : `用 [换块] 时，用一句自然的话过渡到「${dimensionScript(stageAfterBlock.dim)?.label ?? '下一块'}」，但不要替那一块把问题先问了。`
+        : stageAfterBlock.kind === 'state'
+          ? '用 [换块] 时提醒他先在卡片上把状态打完分（心情、睡眠、运动、饮食），别替他往下问。'
+          : `用 [换块] 时，用一句自然的话过渡到「${dimensionScript(stageAfterBlock.dim)?.label ?? '下一块'}」，但不要替那一块把问题先问了。`
 
   const advanceInstruction = blockWillFinish
     ? blockTail
-    : `自然地过渡到下一个参考题目：「${nextQuestion}」。可以顺着刚才的话带过去，不要生硬地念题目。`
+    : `自然地过渡到下一个要问到的：${nextQuestion?.intent ?? ''}` +
+      (nextQuestion ? `（示例：「${nextQuestion.examples.join('」「')}」，只是意思，用你自己的话说）` : '') +
+      `。可以顺着刚才的话带过去，不要生硬地念题目。`
 
   const user = [
     `当前区块：${script.label}（关心的是：${script.hint}）`,
@@ -267,13 +313,14 @@ export function buildTurnPrompt(
     formatTranscript(history, dim),
     '',
     '本区块进度：',
-    `- 当前参考题目：「${question}」`,
+    `- 这一轮要问到：${question?.intent ?? ''}`,
+    ...(question
+      ? [`- 示例问法（只是意思，用你自己的话说，别照抄）：「${question.examples.join('」「')}」`]
+      : []),
     `- 本题已追问 ${progress.followUpCount} 次，上限 ${cap} 次${atCap ? '（已达上限，只能换题或换块）' : ''}`,
     `- 整体进度：${formatProgress(state)}`,
     '',
     poolBlock(dim),
-    '',
-    '这一类问题通常想问到：' + (script.followUps.join(' / ') || '细节、判断依据、卡点、结果'),
     '',
     '刚刚对方的回答：',
     `「${lastAnswer}」`,
@@ -283,14 +330,15 @@ export function buildTurnPrompt(
       ? '- 本题追问次数已到上限，只能用 [换题] 或 [换块]。'
       : [
           '- [追问]：这句话里有具体、值得挖的细节（判断依据、卡点、结果、感受），顺着它再问一到三个小问题，把这件事问透。',
-          '- [换题]：这个话题已经聊清楚了，换到参考题目里的下一个。',
+          `- [换题]：**先确认这一轮要问到的（${question?.intent ?? ''}）他真的答到了**，答到了才换；没答到就换个说法再问一次，不许跳过。`,
           '- [换块]：这一块的关键都拿到了（他讲了做了什么、卡在哪、当时的判断或感受），可以进下一块了。',
         ].join('\n'),
     `- 用 [换题] 时，${advanceInstruction}`,
     ...(blockWillFinish ? [] : [`- ${blockTail}`]),
     '',
     '要求：一次只说一句话（问一到三个小问题也行），不要堆成一长串；' +
-      '采访阶段保持中立，不评价、不说教、不替他下结论。',
+      '采访阶段保持中立，不评价、不说教、不替他下结论；' +
+      '**措辞由你定，但前面「要问到」的那件事必须问到**，换个说法接着问也算。',
   ].join('\n')
 
   return [
@@ -304,18 +352,13 @@ const RESULT_SCHEMA = `{
   "people": [{ "name": "老王", "note": "方案卡在他那儿没拍板" }],
   "things": ["这周买了什么、花了什么、该维护什么，最多 4 条"],
   "pending": ["未办：还没做完、一直拖着的事，最多 4 条"],
+  "growth": ["成长：这周看了什么、听了什么、想通了什么，每条一句话，最多 3 条"],
   "highlights": [
     "第一条：这一周的主线，一句话，要有取舍有判断",
     "后面 2 到 3 条：清单里看不到的东西 —— 为什么、代价、反复出现的模式、跟上周比的变化"
   ],
   "nextFocus": ["下周重点，正好 3 条"],
-  "nextFollowUps": ["下周要跟进的人名，最多 2 个"],
-  "state": {
-    "body": "身体：睡眠、运动、吃饭怎么样，一句话",
-    "mood": "情绪：整体基调、最消耗情绪的一件事，一句话",
-    "focus": "精力 / 专注：高峰在做什么、被什么打断最多，一句话",
-    "growth": "心智：这周的输入、学到的一条，一句话"
-  }
+  "nextFollowUps": ["下周要跟进的人名，最多 2 个"]
 }`
 
 const RESULT_RULES = `要求：
@@ -327,8 +370,10 @@ const RESULT_RULES = `要求：
 - people 的 name 只写人名或称呼，note 写和这个人之间发生了什么。
 - things 这一栏的范围比他以为的宽：实物（工具、设备、家居）、花销与订阅（续费、会员、数字资产）、
   该维护的事（备份、保修、体检、清理）都算。
-- state 四项各一句话（身体 / 情绪 / 精力专注 / 心智成长），**不要写分数、不要写「几分」**；
-  哪一项这周没聊到就留空字符串，别拿别的项来补。
+- growth 是**这周长了什么**：看了什么、听了什么、跟谁聊出点东西、对哪件事的看法变了，
+  最多 3 条；**不要写成「做了什么」**（那是 events 那一栏的活），也不要写成感想口号。
+- 状态（心情 / 睡眠 / 运动 / 饮食的分数与备注）**不由你产出**：那一段是用户在界面上自己点的，
+  别在 JSON 里编这一项，编了也会被界面上的真实数据覆盖。
 - pending 里如果包含对上一周承诺的交代（这次问过对账才会有）：文字里带上「上周说好的」字样，
   例如「上周说好的把报价发出去 —— 只发了初稿」；做到的事不用单列，它本来就在 events 里。
 - highlights 的第一条是**这一周的主线**：一句话说清这周到底是怎么回事、重心落在哪，
@@ -337,7 +382,7 @@ const RESULT_RULES = `要求：
 - highlights 后面 2 到 3 条，只写**清单里看不到的东西**：为什么是这样、代价是什么、
   什么在反复出现、跟上周比有什么变化。**不要写「做了什么」** —— 那是 events / things 那一栏的活。
 - 可以评价（哪件事做得值、哪里是反复掉的坑），但**对事不对人**：不说教、不贴标签、不替他下结论。
-- 判断标准：如果某条支撑能在 events / people / things / pending 里找到意思相近的一句，
+- 判断标准：如果某条支撑能在 events / people / things / pending / growth 里找到意思相近的一句，
   就重写它；重写不出来就宁可少写一条。`
 
 /** 汇总全部对话，产出结构化结果 */
@@ -406,8 +451,9 @@ ${RESULT_SCHEMA}
 ${RESULT_RULES}
 
 这一次的额外约定（重要）：
-- events / people / things / pending / state 这几栏**已经由用户亲手改过**，必须原样保留每一条，一个字都不要改写、不要删除、不要重排。
+- events / people / things / pending / growth 这几栏**已经由用户亲手改过**，必须原样保留每一条，一个字都不要改写、不要删除、不要重排。
 - 只有当用户的补充里明确提到了**新**的内容时，才可以把新内容**追加**到这些栏的末尾。
+- 状态（四项分数与备注）不归你管，别动它。
 - 你真正要重写的是 highlights、nextFocus、nextFollowUps 这三项。`,
     },
     {

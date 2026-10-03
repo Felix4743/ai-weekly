@@ -1,11 +1,14 @@
 /**
- * 采访区块。前四个是内容块（状态 / 事情 / 人际 / 物与钱），
- * `reconcile`（上周对账）是夹在状态与事情之间的一道单题，只在上周有记录时问。
+ * 采访区块。内容是四块（事情 / 人际 / 物品与支出 / 成长），
+ * `reconcile`（上周对账）是夹在定档与事情之间的一道单题，只在上周有记录时问。
  * 顺序就是 `script.ts` 里 `SCRIPT` 的顺序。
+ *
+ * 「状态」不是问答块 —— 0.9.3 起它是开场一张打分卡（四项 0–5 星 + 一行备注），
+ * 不进 `SCRIPT`，也不占 AI 轮次。
  */
-export type Dimension = 'mood' | 'reconcile' | 'event' | 'people' | 'thing'
+export type Dimension = 'reconcile' | 'event' | 'people' | 'thing' | 'growth'
 
-/** 复盘深度：深度 / 中度 / 快速，由用户在状态块之后自己挑 */
+/** 复盘深度：深度 / 中度 / 快速，由用户在状态打分卡之后自己挑 */
 export type Depth = 'deep' | 'mid' | 'fast'
 
 /**
@@ -22,13 +25,6 @@ export interface ChatMessage {
   text: string
   /** 这条消息所属的采访区块；用户消息继承所回答问题的区块 */
   dimension: Dimension
-  /**
-   * 这条回答对应状态四项里的哪一项。只在状态块里有值。
-   *
-   * 界面据此把一排星星挂在这条回答下面 —— 「问完一段就点一次」，
-   * 分数跟的是**那条回答**，所以换了块、翻回去看历史都还能改。
-   */
-  stateKey?: StateKey
   at: number
 }
 
@@ -58,7 +54,14 @@ export interface InterviewState {
   active: Dimension | null
   blocks: BlockProgressMap
   /**
-   * 复盘深度档位；null 表示状态块还没聊完、用户还没挑。
+   * 开场那张状态打分卡交上来了没有。
+   *
+   * 打分卡是客户端的一屏（四项点星 + 一行备注），不占 AI 轮次，
+   * 所以它用一个显式开关表示，而不是像别的步骤那样用区块进度。
+   */
+  stateDone: boolean
+  /**
+   * 复盘深度档位；null 表示还没挑。
    * 挑档位是客户端的三个按钮，不是让模型去猜 —— 确定性才算得清覆盖率。
    */
   depth: Depth | null
@@ -79,56 +82,74 @@ export interface LastWeekPlan {
   followUps: string[]
 }
 
+/**
+ * 本周已经聊过一次时的摘要（0.9.3 的「接着上次补」）。
+ *
+ * 只带已经记下来的条目：开场要说一句「这周你已经聊过一次，记了这些…」，
+ * 模型据此避开重复提问，也知道今天该往哪儿补。
+ */
+export interface ThisWeekSummary {
+  /** 上次写盘的时间 */
+  savedAt: number
+  /** 已经记下的条目，已经拼成人话，按块分组 */
+  lines: string[]
+}
+
 /** 构建提示词时可能要带的上下文 */
 export interface InterviewContext {
   lastWeek?: LastWeekPlan
   /** 上一周是哪个周，写进提示词里，模型可以自然地说「上周」 */
   lastWeekKey?: string
+  /** 本周已经有记录了；有就走「接着上次补」 */
+  thisWeek?: ThisWeekSummary
 }
 
 /**
- * 状态四项的键；**顺序 = 状态块四道主问题的顺序**
- * （见 `script.ts` 里 `mood.mainQuestions`，script.test.ts 钉着这两边等长）。
+ * 状态四项的键；**顺序 = 打分卡上四排星的顺序**（用户 2026-10-03 定的四项）。
+ *
+ * 0.9.2 及以前是「身体 / 情绪 / 精力 / 心智」四行文字 + 每行一颗星；
+ * 0.9.3 起状态只剩这四项的分数 + 一行备注。
  */
-export const STATE_KEYS = ['body', 'mood', 'focus', 'growth'] as const
+export const STATE_KEYS = ['mood', 'sleep', 'sport', 'diet'] as const
 
 export type StateKey = (typeof STATE_KEYS)[number]
 
 /**
- * 状态打分：每项 1–5 星，**没打分就没有这个键**（0 星 = 用户点掉了那颗星）。
+ * 状态打分：每项 1–5 星，**没打分就没有这个键**（再点同一颗星 = 取消）。
  *
- * 分数只由界面产生 —— 提示词里没让模型打分，就算它自己编了一组，
- * 生成那一步也会被界面上真实的点击覆盖掉（见 `stateScore.attachScores`）。
+ * 分数只由界面产生 —— 提示词里没有状态这一栏，模型碰不到它；
+ * 生成那一步用界面上真实的点击覆盖（见 `stateScore.attachState`）。
  */
 export type StateScores = Partial<Record<StateKey, number>>
 
 /**
- * 状态那一段：四项各一句文字（0.9.2 起每项还可以点一个 0–5 星的分）。
+ * 状态那一段：四项各一个 0–5 星的分，外加一行备注。
+ *
+ * 分数可以不点（未打分），备注可以留空 —— 两个都空就是「没说状态」。
  */
 export interface WeeklyState {
-  /** 身体 */
-  body: string
-  /** 情绪 */
-  mood: string
-  /** 精力 / 专注 */
-  focus: string
-  /** 心智（成长） */
-  growth: string
   /**
-   * 四项各一个 1–5 星的分；一项都没打分时整个键不出现。
+   * 四项各一个 1–5 星的分；一项都没点整个键不出现。
    *
-   * 旧档（0.9.1 及以前）没有这个键，读回来就是 undefined —— 界面显示「未打分」，
-   * 不冒充 0 分。
+   * 旧档（0.9.2 及以前）这里没有分数，四行文字读进 `note`（见 `parseResult.ts` 的 `toState`、
+   * 读档入口 `storage/shape.ts`）。
    */
   scores?: StateScores
+  /** 想补一句就写在这儿；旧档那四行状态文字也并到这一行 */
+  note: string
 }
 
 export function createEmptyState(): WeeklyState {
-  return { body: '', mood: '', focus: '', growth: '' }
+  return { note: '' }
 }
 
 export function isStateEmpty(state: WeeklyState): boolean {
-  return !state.body && !state.mood && !state.focus && !state.growth
+  return !state.note && !hasAnyScore(state)
+}
+
+/** 内部小工具：这一份状态里有没有点过分 */
+function hasAnyScore(state: WeeklyState): boolean {
+  return STATE_KEYS.some((key) => typeof state.scores?.[key] === 'number')
 }
 
 export interface WeeklyResult {
@@ -140,13 +161,15 @@ export interface WeeklyResult {
   things: string[]
   /** 悬而未决 */
   pending: string[]
+  /** 成长（0.9.3 新开的一栏，纯文字、不打分） */
+  growth: string[]
   /** 本周热点 */
   highlights: string[]
   /** 下周重点 */
   nextFocus: string[]
   /** 下周要跟进的人 */
   nextFollowUps: string[]
-  /** 状态：身体 / 情绪 / 精力 / 心智 各一句 */
+  /** 状态：四项分数 + 一行备注 */
   state: WeeklyState
 }
 
@@ -156,6 +179,7 @@ export function createEmptyResult(): WeeklyResult {
     people: [],
     things: [],
     pending: [],
+    growth: [],
     highlights: [],
     nextFocus: [],
     nextFollowUps: [],

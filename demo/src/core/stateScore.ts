@@ -1,4 +1,5 @@
 import { STATE_KEYS, type StateKey, type StateScores, type WeeklyState } from './types'
+import { stateField } from './stateFields'
 
 /**
  * 状态评分：0–5 星。
@@ -48,21 +49,27 @@ export function withScore(
 }
 
 /**
- * 把「界面上的分数」贴到一份状态上。
+ * 把「界面上的分数」与备注拼成一份状态（0.9.3 起状态就是「四项分数 + 一行备注」）。
  *
- * 一项都没打分就**不写这个键** —— 否则 `{scores:{}}` 会进归档，
- * 以后再读回来还得分「空对象」和「没有」两种情况。
- * 原来那份状态上如果带着旧分数（用户把最后一颗星点掉了），也要一起拿掉。
+ * 给的分数与备注就是全部：旧状态不参与合并，省得模型编的分数、上一版留下的
+ * 文字从缝里钻回来。一项都没点就**不写 `scores` 键** —— 否则 `{scores:{}}`
+ * 会进归档，以后再读回来还得分「空对象」和「没有」两种情况。
  */
-export function attachScores(state: WeeklyState, scores: StateScores | undefined): WeeklyState {
+export function attachState(scores: StateScores | undefined, note: string): WeeklyState {
   const clean = coerceScores(scores)
-  const next: WeeklyState = {
-    body: state.body,
-    mood: state.mood,
-    focus: state.focus,
-    growth: state.growth,
-  }
+  const trimmed = note.trim()
+  const next: WeeklyState = { note: trimmed }
   return hasAnyScore(clean) ? { ...next, scores: clean } : next
+}
+
+/** 界面上那四排星的总览：`心情 4/5 · 睡眠 3/5 · 运动 5/5 · 饮食 2/5`；一项没点就是空串 */
+export function scoresText(scores: StateScores | undefined): string {
+  return STATE_KEYS.filter((key) => coerceScore(scores?.[key]) !== undefined)
+    .map((key) => {
+      const field = stateField(key)
+      return `${field?.label ?? key} ${coerceScore(scores?.[key])}/${SCORE_MAX}`
+    })
+    .join(' · ')
 }
 
 /** 界面上的分数文案：`3 / 5`，没打分就是「未打分」 */

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { describeError } from '../src/core/aiError'
 import type { ChatTransport } from '../src/core/chatTransport'
-import { createInterview, isBlockComplete, nextStep, openBlock, setDepth } from '../src/core/interview'
+import { createInterview, isBlockComplete, nextStep, openBlock, setDepth, setStateDone } from '../src/core/interview'
 import { createOpenAiClient } from '../src/core/openAiClient'
 import { followUpCap, SCRIPT, TOTAL_MAIN_QUESTIONS } from '../src/core/script'
 import {
@@ -99,15 +99,14 @@ const ANSWERS: Record<Dimension, string[]> = {
     '买了两本讲复盘的书，翻了几页就搁在床头了。',
     '给自己换了把好点的椅子，坐久了腰确实舒服些。',
   ],
-  mood: [
-    '挺累的，主要是方案反复改这件事一直拖着。',
-    '睡眠不太好，平均睡六个多小时，早上起来还是困。',
-    '周三下午跟同事把方案捋顺的那一刻，挺舒服的。',
-    '这周有两三天心情挺闷的，说不上具体因为什么。',
-    '周五下班去跑了五公里，跑完整个人轻快多了。',
-    '脑子一直很满，要做的事太多，静不下来。',
-    '比上周好一点，至少有一件事是真正推完了的。',
-    '好像没什么了，就这些。',
+  growth: [
+    '看了一本讲定价的书，里面那个「按价值定价」的说法我用在这周的报价上了。',
+    '跟小李吃饭聊到他们怎么带新人，回来我把我们组的交接流程改了一版。',
+    '把这周的故障复盘写了一遍，才想明白真正的问题不在代码，在发布流程没人拦。',
+    '听了一期播客讲时间管理，没什么新东西，但把我一直拖着的那件事说清楚了。',
+    '跟老王吵完那一架，我发现我其实怕的不是他的意见，是怕自己做错。',
+    '看了两篇同行的复盘文章，学到一个办法：先把「这周不该做的事」记下来。',
+    '没什么特别的，就上面说的这些。',
   ],
 }
 
@@ -268,11 +267,15 @@ describe('真模型试跑台', () => {
         ]
       }
 
+      /**
+       * 0.9.3 的流程：先交状态卡（分数由界面点出来，试跑台不点），再定档，
+       * 然后才是「上周对账 → 事情 → 人际 → 物品与支出 → 成长」。
+       */
+      state = setStateDone(state)
+      state = setDepth(state, LIVE_DEPTH)
+
       try {
         for (const block of SCRIPT) {
-          // 0.9.1 的流程是「状态 → 定深度 → 上周对账 → 事情 → 人际 → 物与钱」，
-          // 状态块聊完才定档，定档之后才进对账和内容块。
-          if (block.key !== 'mood') state = setDepth(state, LIVE_DEPTH)
           state = openBlock(state, block.key)
           const dim = block.key
           const openingFrom = calls.length

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { CONTENT_BLOCKS, DEPTHS, dimensionLabel, dimensionScript } from '../core/script'
-import { stateField } from '../core/stateFields'
 import {
   answeredInBlock,
   isAllComplete,
@@ -8,6 +7,7 @@ import {
   nextStage,
   questionsInBlock,
 } from '../core/interview'
+import { STATE_FIELDS } from '../core/stateFields'
 import type { ChatMessage, Depth, Dimension, InterviewState, StateKey, StateScores } from '../core/types'
 import { StateScore } from './StateScore'
 
@@ -21,14 +21,22 @@ interface Props {
   busy: boolean
   sampleText: string
   hasAnyAnswer: boolean
-  /** 状态四项的分数：采访里点过的那些，点完还能改 */
+  /** 状态卡上的四项分数：采访里点过的那些，点完还能改 */
   stateScores: StateScores
+  /** 状态卡下面那一行备注 */
+  stateNote: string
   onOpenBlock: (dim: Dimension) => void
   onSend: (text: string) => void
   /** 用户点了深度 / 中度 / 快速复盘 */
   onPickDepth: (depth: Depth) => void
-  /** 用户在状态那段回答下面点了星 */
+  /** 用户在状态卡上点了星 */
   onScoreState: (key: StateKey, value: number | undefined) => void
+  /** 用户在状态卡上改了备注 */
+  onNoteChange: (text: string) => void
+  /** 状态卡交上去了：接下来该定档 */
+  onStateDone: () => void
+  /** 从头再聊一遍（这周已记的不看、不并） */
+  onStartFresh: () => void
   onGenerate: () => void
 }
 
@@ -42,10 +50,14 @@ export function ChatPage({
   sampleText,
   hasAnyAnswer,
   stateScores,
+  stateNote,
   onOpenBlock,
   onSend,
   onPickDepth,
   onScoreState,
+  onNoteChange,
+  onStateDone,
+  onStartFresh,
   onGenerate,
 }: Props) {
   const [draft, setDraft] = useState('')
@@ -59,7 +71,9 @@ export function ChatPage({
   const stage = nextStage(interview)
   const nextDim = stage.kind === 'block' ? stage.dim : null
   const allDone = isAllComplete(interview)
-  /** 状态聊完、还没定档：这一步由用户点按钮决定，不让模型猜 */
+  /** 还没交状态卡：这一屏只有那张卡，别的一概先按住 */
+  const showState = stage.kind === 'state'
+  /** 状态打完了、还没定档：这一步由用户点按钮决定，不让模型猜 */
   const showDepth = stage.kind === 'depth'
   /** 发送下面那排「聊一聊XX」：当前这一块不用再跳过去 */
   const otherBlocks = CONTENT_BLOCKS.filter((d) => d.key !== active)
@@ -105,6 +119,7 @@ export function ChatPage({
               role="tab"
               aria-selected={isActive}
               className={`tab ${status}${isActive ? ' active' : ''}`}
+              disabled={busy || showState}
               onClick={() => onOpenBlock(d.key)}
             >
               <span className="tab-label">{d.label}</span>
@@ -120,11 +135,45 @@ export function ChatPage({
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
 
+      {/* 第一步：状态卡。先打完分，再问要聊多细 —— 顺序由流程保证，不靠提示词求人 */}
+      {showState && (
+        <section className="state-card">
+          <div className="state-lead">
+            先从状态开始：心情、睡眠、运动、饮食，各点几颗星。想补一句就写在下面。
+          </div>
+          <div className="state-form">
+            {STATE_FIELDS.map((f) => (
+              <div key={f.key} className="state-row">
+                <span className="state-label">{f.label}</span>
+                <StateScore
+                  label={f.ask}
+                  ariaLabel={`${f.label}评分`}
+                  score={stateScores[f.key]}
+                  disabled={busy}
+                  onChange={(v) => onScoreState(f.key, v)}
+                />
+              </div>
+            ))}
+            <textarea
+              className="state-note"
+              rows={2}
+              value={stateNote}
+              disabled={busy}
+              placeholder="这周状态想补一句什么…（可以空着）"
+              onChange={(e) => onNoteChange(e.target.value)}
+            />
+          </div>
+          <button className="btn primary" type="button" disabled={busy} onClick={onStateDone}>
+            打好了，开始聊这周
+          </button>
+        </section>
+      )}
+
       {/* 定档：三个按钮，选完才开始往下聊 */}
       {showDepth && (
         <section className="depth-picker">
           <div className="depth-lead">
-            状态聊完了。接下来想聊到多细？选一个就行，聊到一半想改也可以。
+            状态打完了。接下来想聊到多细？选一个就行，聊到一半想改也可以。
           </div>
           <div className="depth-options">
             {DEPTHS.map((d) => (
@@ -153,32 +202,22 @@ export function ChatPage({
         </header>
 
         <div className="stage-body" ref={bodyRef}>
-          {!active && <p className="block-empty">点上面任意一块，开始聊。</p>}
+          {!active && !showState && !showDepth && (
+            <p className="block-empty">点上面任意一块，开始聊。</p>
+          )}
 
           {active && blockMessages.length === 0 && !typing && (
             <p className="block-empty">正在准备第一个问题…</p>
           )}
 
-          {blockMessages.map((m) => {
-            const field = m.stateKey ? stateField(m.stateKey) : undefined
-            return (
-              <div key={m.id} className="msg-block">
-                <div className={`msg ${m.role}`}>
-                  {m.role === 'ai' && <span className="avatar" aria-hidden="true" />}
-                  <div className="bubble">{m.text}</div>
-                </div>
-                {/* 状态那一段：问完一项就在自己的回答下面点一次星，翻回去还能改 */}
-                {field && (
-                  <StateScore
-                    label={field.ask}
-                    score={stateScores[field.key]}
-                    disabled={busy}
-                    onChange={(v) => onScoreState(field.key, v)}
-                  />
-                )}
+          {blockMessages.map((m) => (
+            <div key={m.id} className="msg-block">
+              <div className={`msg ${m.role}`}>
+                {m.role === 'ai' && <span className="avatar" aria-hidden="true" />}
+                <div className="bubble">{m.text}</div>
               </div>
-            )
-          })}
+            </div>
+          ))}
 
           {typing && streamText && (
             <div className="msg ai">
@@ -280,6 +319,15 @@ export function ChatPage({
               聊一聊{d.label}
             </button>
           ))}
+          {/* 一周里聊第二次是常态：默认接着上次补，想推倒重来说一声 */}
+          <button
+            className="btn chip"
+            type="button"
+            disabled={busy}
+            onClick={onStartFresh}
+          >
+            从头再聊一遍
+          </button>
         </div>
 
         {active && <div className="composer-note">Enter 发送 · Shift + Enter 换行</div>}

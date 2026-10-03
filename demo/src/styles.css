@@ -1207,7 +1207,23 @@ body {
   color: var(--ink-3);
 }
 
-/* ---------- 状态卡：四行文字，各一句 ---------- */
+/* ---------- 状态卡：四项各一排星，下面一行备注 ---------- */
+
+.state-card {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.state-lead {
+  margin-bottom: 10px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
 
 .state-form {
   display: flex;
@@ -1239,6 +1255,31 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
   background: #fff;
+}
+
+/* 备注：一句话，想写就写，不写也行 */
+.state-note {
+  width: 100%;
+  margin-top: 2px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--panel);
+}
+
+.state-note:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: #fff;
+}
+
+.state-card > .btn.primary {
+  margin-top: 12px;
 }
 
 /* ---------- 状态评分：一排 0–5 星 ---------- */

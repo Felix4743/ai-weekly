@@ -4,6 +4,7 @@ import {
   TOTAL_MAIN_QUESTIONS,
   dimensionScript,
   followUpCap,
+  type QuestionSpec,
 } from './script'
 import type {
   BlockProgress,
@@ -11,10 +12,8 @@ import type {
   Depth,
   Dimension,
   InterviewState,
-  StateKey,
   TurnAction,
 } from './types'
-import { STATE_KEYS } from './types'
 
 export type { TurnAction }
 
@@ -39,7 +38,7 @@ export function createInterview(options: CreateInterviewOptions = {}): Interview
   if (!hasLastWeek) {
     blocks.reconcile = { ...EMPTY_PROGRESS, complete: true }
   }
-  return { active: null, blocks, depth: null }
+  return { active: null, blocks, stateDone: false, depth: null }
 }
 
 export function blockProgress(s: InterviewState, dim: Dimension): BlockProgress {
@@ -53,39 +52,31 @@ export function openBlock(s: InterviewState, dim: Dimension): InterviewState {
   return { ...s, active: dim }
 }
 
-/* ---------------- 当前该问什么 ---------------- */
-
-export function currentQuestion(s: InterviewState, dim: Dimension): string {
-  const script = dimensionScript(dim)
-  if (!script) return ''
-  const p = blockProgress(s, dim)
-  return script.mainQuestions[Math.min(p.askIndex, script.mainQuestions.length - 1)] ?? ''
+/** 开场那张状态打分卡交上来了（四项点完星、点了开始） */
+export function setStateDone(s: InterviewState): InterviewState {
+  if (s.stateDone) return s
+  return { ...s, stateDone: true }
 }
 
-export function currentFollowUp(s: InterviewState, dim: Dimension): string {
+/* ---------------- 当前该问什么 ---------------- */
+
+export function currentQuestionSpec(s: InterviewState, dim: Dimension): QuestionSpec | undefined {
   const script = dimensionScript(dim)
-  if (!script) return ''
+  if (!script) return undefined
   const p = blockProgress(s, dim)
-  return script.followUps[p.followUpCount % script.followUps.length] ?? ''
+  return script.mainQuestions[Math.min(p.askIndex, script.mainQuestions.length - 1)]
+}
+
+export function currentFollowUpSpec(s: InterviewState, dim: Dimension): QuestionSpec | undefined {
+  const script = dimensionScript(dim)
+  if (!script) return undefined
+  const p = blockProgress(s, dim)
+  return script.followUps[p.followUpCount % script.followUps.length]
 }
 
 /** 当前这一问是不是追问（用于让 AI 区分「换题」和「深挖」） */
 export function isFollowUpTurn(s: InterviewState, dim: Dimension): boolean {
   return blockProgress(s, dim).followUpCount > 0
-}
-
-/**
- * 状态那一段：刚回答的这句对应四项里的哪一项。
- *
- * 状态块的参考问题与 `STATE_KEYS` 一一对应（身体 / 情绪 / 精力 / 心智），
- * 所以按 `askIndex` 就能算出这一条回答该挂哪一排星。
- * 四道题都问完（含自由聊）之后返回 undefined —— 那时候要说的话不归哪一项。
- */
-export function stateKeyForAnswer(s: InterviewState): StateKey | undefined {
-  const p = blockProgress(s, 'mood')
-  // 四道题问完之后 askIndex 停在 3 上，这时得看 complete，不然自由聊的话会被算到「心智」头上
-  if (p.complete) return undefined
-  return STATE_KEYS[p.askIndex]
 }
 
 /* ---------------- 深度档位 ---------------- */
@@ -180,29 +171,31 @@ export function isFreeChat(s: InterviewState, dim: Dimension): boolean {
 export function finishAll(s: InterviewState): InterviewState {
   const blocks = {} as BlockProgressMap
   for (const d of SCRIPT) blocks[d.key] = { ...blockProgress(s, d.key), complete: true }
-  return { active: s.active, blocks, depth: s.depth }
+  return { active: s.active, blocks, stateDone: true, depth: s.depth }
 }
 
 /* ---------------- 流程走到哪儿了 ---------------- */
 
 export type Stage =
-  | { kind: 'block'; dim: Dimension }
+  | { kind: 'state' }
   | { kind: 'depth' }
+  | { kind: 'block'; dim: Dimension }
   | { kind: 'done' }
 
 /**
  * 这一刻该干什么。纯函数，UI 与 App 都靠它，避免各自记一套顺序。
  *
- * 顺序：状态没聊完 → 状态；聊完了还没定档 → 等用户挑档位；
- * 然后按 SCRIPT 顺序走（对账 → 事情 → 人际 → 物与钱），全完 → done。
+ * 顺序：**先交状态打分卡** → 定档 → 按 SCRIPT 顺序走（对账 → 事情 → 人际 → 物品与支出 → 成长）
+ * → 全完 → done。
+ *
+ * 状态卡不是问答块：它是客户端一屏（四项点星 + 一行备注），
+ * 交上来才算 `stateDone`，所以「先打分再开始问」是流程保证，不是提示词里的请求。
  */
 export function nextStage(s: InterviewState): Stage {
-  const mood = blockProgress(s, 'mood')
-  if (!mood.complete) return { kind: 'block', dim: 'mood' }
+  if (!s.stateDone) return { kind: 'state' }
   if (s.depth === null) return { kind: 'depth' }
 
   for (const d of SCRIPT) {
-    if (d.key === 'mood') continue
     if (!blockProgress(s, d.key).complete) return { kind: 'block', dim: d.key }
   }
   return { kind: 'done' }

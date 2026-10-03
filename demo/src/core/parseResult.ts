@@ -59,21 +59,40 @@ function toPeople(value: unknown): PersonNote[] {
   return out
 }
 
+/** 0.9.1/0.9.2 那两版状态是四行文字，读回来时并成一行备注（原话保留） */
+const LEGACY_STATE_ROWS: { label: string; keys: string[] }[] = [
+  { label: '身体', keys: ['body', '身体', 'physical'] },
+  { label: '情绪', keys: ['mood', '情绪', 'emotion'] },
+  { label: '精力', keys: ['focus', '精力', '专注', 'energy'] },
+  { label: '心智', keys: ['growth', '心智', '成长', 'learning'] },
+]
+
 /**
- * 状态那一段：四项各一句（0.9.2 起还带四项分数）。
+ * 状态那一栏：0.9.3 起只剩「四项分数 + 一行备注」。
  *
- * 容错口径和别处一致 —— 缺项留空、字段名各种叫法都认、模型写成数组也接得住。
+ * 容错口径和别处一致 —— 字段名各种叫法都认、缺项留空。
  * 分数只有 1–5 的整数才算数：模型自己编的分也认（读得回来），
  * 但生成与重新整理两步都会用界面上真实的点击把它盖掉。
+ * 老的「四行文字」不会丢：并成备注，原话照抄。
  */
 function toState(value: unknown): WeeklyState {
   const out = createEmptyState()
   if (!value || typeof value !== 'object' || Array.isArray(value)) return out
   const o = value as Record<string, unknown>
-  out.body = readString(o.body ?? o.身体 ?? o.physical)
-  out.mood = readString(o.mood ?? o.情绪 ?? o.emotion)
-  out.focus = readString(o.focus ?? o.精力 ?? o.专注 ?? o.energy)
-  out.growth = readString(o.growth ?? o.心智 ?? o.成长 ?? o.learning)
+
+  const note = readString(o.note ?? o.备注 ?? o.说明 ?? '')
+  if (note) out.note = note
+  else {
+    const rows: string[] = []
+    for (const row of LEGACY_STATE_ROWS) {
+      // 老档的键名五花八门（英文、中文、还有 0.9.1 中途换过的说法），逐个认
+      const raw = row.keys.map((key) => o[key]).find((v) => v !== undefined && v !== null)
+      const text = readString(raw ?? '')
+      if (text) rows.push(`${row.label}：${text}`)
+    }
+    if (rows.length > 0) out.note = rows.join('；')
+  }
+
   const scores = coerceScores(o.scores ?? o.评分 ?? o.打分)
   if (hasAnyScore(scores)) out.scores = scores
   return out
@@ -94,10 +113,11 @@ export function coerceResult(raw: unknown): WeeklyResult | null {
     people: toPeople(o.people ?? o.人际),
     things: toStringArray(o.things ?? o.物品),
     pending: toStringArray(o.pending ?? o.未办 ?? o.悬而未决 ?? o.pendingItems),
+    growth: toStringArray(o.growth ?? o.成长),
     highlights: toStringArray(o.highlights ?? o.本周主线 ?? o.本周热点),
     nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
     nextFollowUps: toStringArray(o.nextFollowUps ?? o.下周跟进),
-    // 0.9.1 之前的档里没有 state：给四个空串，不炸也不冒充有内容
+    // 0.9.0 之前的档里没有 state：给空备注，不炸也不冒充有内容
     state: toState(o.state ?? o.状态),
   }
 }

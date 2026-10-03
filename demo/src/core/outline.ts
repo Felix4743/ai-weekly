@@ -1,12 +1,14 @@
-import type { WeeklyResult } from './types'
+import { coerceScore } from './stateScore'
+import { STATE_KEYS, type WeeklyResult } from './types'
 
-/** 结果页的七个区块，顺序即页面上的先后顺序 */
+/** 结果页的八个区块，顺序即页面上的先后顺序 */
 export type SectionKey =
   | 'events'
   | 'people'
   | 'things'
   | 'pending'
   | 'state'
+  | 'growth'
   | 'highlights'
   | 'plan'
 
@@ -16,6 +18,7 @@ export const SECTION_KEYS: SectionKey[] = [
   'things',
   'pending',
   'state',
+  'growth',
   'highlights',
   'plan',
 ]
@@ -26,6 +29,7 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   things: '物品',
   pending: '未办',
   state: '状态',
+  growth: '成长',
   highlights: '本周主线',
   plan: '下周计划',
 }
@@ -54,11 +58,14 @@ export function countSection(result: WeeklyResult, key: SectionKey): number {
       return result.things.length
     case 'pending':
       return result.pending.length
-    // 状态四项各算一条：写了几项就显示几
+    // 状态：点了几项分算几条，写了备注再加一条。
+    // 用 coerceScore 判分而不是 typeof === 'number' —— 界面上的星只认 1–5，
+    // 脏值（0 / 6 / 小数）界面上是「未打分」，目录也不该算它一条。
     case 'state':
-      return [result.state.body, result.state.mood, result.state.focus, result.state.growth].filter(
-        (t) => t.trim().length > 0,
-      ).length
+      return STATE_KEYS.filter((key) => coerceScore(result.state.scores?.[key]) !== undefined).length +
+        (result.state.note.trim() ? 1 : 0)
+    case 'growth':
+      return result.growth.length
     case 'highlights':
       return result.highlights.length
     case 'plan':

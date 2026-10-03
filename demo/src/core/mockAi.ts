@@ -1,12 +1,12 @@
 import type { AiClient, DeltaHandler } from './aiClient'
 import {
   blockProgress,
-  currentFollowUp,
-  currentQuestion,
+  currentFollowUpSpec,
+  currentQuestionSpec,
   nextStage,
   nextStep,
 } from './interview'
-import { SCRIPT, dimensionLabel, followUpCap } from './script'
+import { SCRIPT, dimensionLabel, followUpCap, spoken } from './script'
 import {
   createEmptyResult,
   type ChatMessage,
@@ -16,28 +16,24 @@ import {
   type PersonNote,
   type TurnAction,
   type WeeklyResult,
-  type WeeklyState,
 } from './types'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** 整场采访的第一句话；状态卡是用户在界面上点的，所以开场在状态之后 */
+const GREETING = '周末好。我们花几分钟，把这一周过一遍。\n\n'
+
 /** 每个区块第一次被打开时的开场语 */
 const OPENERS: Record<Dimension, string> = {
-  mood: '周末好。我们花几分钟，把这一周过一遍。\n\n先从状态开始 —— ',
   reconcile: '对一下上周说好的。',
   event: '好，说说这周都忙了什么。',
   people: '再说说人。',
-  thing: '最后说说东西和钱 —— ',
+  thing: '再说说东西和钱 —— ',
+  growth: '最后聊聊这周长了点什么 —— ',
 }
 
 /** 演示用：一键填入的示例回答，让 Demo 可以快速走完 */
 const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
-  mood: [
-    '睡得还行，运动基本没有，吃饭不太规律，中午经常随便对付。',
-    '整体有点闷，最消耗情绪的是方案反复改这件事，一直悬着。',
-    '上午状态最好，能连着干两小时；下午老被会议切开，很难进入状态。',
-    '看了一本讲定价的书，学到一条：先算清成本再谈折扣，下周报价就能用上。',
-  ],
   reconcile: ['上周说好的报价发出去了，只发了初稿；要跟进的张总一直没约上。'],
   event: [
     '在改客户那个方案，改了三版了还没定下来。',
@@ -58,6 +54,10 @@ const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
     '冲动买了个显示器支架，装上一用发现其实用不上。',
     '该续费的云盘和该备份的照片一直拖着没弄。',
     '这周花了大概两千多，主要是吃饭和交通。',
+  ],
+  growth: [
+    '看了一本讲定价的书，学到先算清成本再谈折扣，下周报价就能用上。',
+    '跟小李那顿饭聊出点东西：他原来也是先做小样再谈大单，我打算下个客户就这么试。',
   ],
 }
 
@@ -173,6 +173,7 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
     people: r.people.map((p) => ({ ...p })),
     things: [...r.things],
     pending: [...r.pending],
+    growth: [...r.growth],
     highlights: [...r.highlights],
     nextFocus: [...r.nextFocus],
     nextFollowUps: [...r.nextFollowUps],
@@ -180,19 +181,9 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
   }
 }
 
-/**
- * 状态四项：状态块的回答按顺序落进 身体 / 情绪 / 精力 / 心智。
- * 只写文字 —— 分数是用户点出来的，不在模型的活儿里（见 stateScore.ts）。
- */
-function buildState(answers: string[]): WeeklyState {
-  const clean = answers.filter((t) => !isNonAnswer(t))
-  const pick = (i: number) => (clean[i] ? firstSentence(clean[i], 40) : '')
-  return { body: pick(0), mood: pick(1), focus: pick(2), growth: pick(3) }
-}
-
 /** 本周主线：从当前清单里挑出最值得记住的几条 */
 function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]>): string[] {
-  const pool = [...result.events, ...result.pending, ...byDim.mood]
+  const pool = [...result.events, ...result.pending, ...byDim.growth]
   const highlights: string[] = []
 
   if (result.events[0]) highlights.push(`${result.events[0]} —— 这是这周精力主要落的地方`)
@@ -201,7 +192,6 @@ function buildHighlights(result: WeeklyResult, byDim: Record<Dimension, string[]
   if (result.pending[0]) highlights.push(`${result.pending[0]} —— 还没办完，下周需要一个交代`)
   if (result.people[0]) highlights.push(`和 ${result.people[0].name} 之间的事没有完全推进`)
   if (result.things[0]) highlights.push(`${firstSentence(result.things[0], 32)} —— 这周和「东西」有关的一笔`)
-  if (byDim.mood[0]) highlights.push(`整体状态：${firstSentence(byDim.mood[0], 32)}`)
 
   return unique(highlights).slice(0, 5)
 }
@@ -314,7 +304,10 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     const stage = nextStage(state)
     if (stage.kind === 'done') return '四块都聊过了。可以生成你的本周梳理了。'
     if (stage.kind === 'depth') {
-      return '状态这块聊得差不多了。接下来你想聊到多细 —— 深度复盘（20 分钟）、中度复盘（12 分钟），还是快速复盘（5 分钟）？'
+      return '想聊到多细 —— 深度复盘（20 分钟）、中度复盘（12 分钟），还是快速复盘（5 分钟）？'
+    }
+    if (stage.kind === 'state') {
+      return '先在卡片上给这周打个分吧：心情、睡眠、运动、饮食，各点几颗星，然后我们再往下聊。'
     }
     return `「${dimensionLabel(dim)}」这块差不多了。接着聊聊「${dimensionLabel(stage.dim)}」，还是先挑别的？`
   }
@@ -324,7 +317,7 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     dim: Dimension,
     history: ChatMessage[],
     onDelta?: DeltaHandler,
-    _ctx?: InterviewContext,
+    ctx?: InterviewContext,
   ): Promise<string> => {
     await wait(760)
     const p = blockProgress(state, dim)
@@ -337,11 +330,21 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       return streamOut(transitionMessage(state, dim), onDelta)
     }
 
-    if (p.followUpCount > 0) return streamOut(currentFollowUp(state, dim), onDelta)
+    if (p.followUpCount > 0) {
+      return streamOut(spoken(currentFollowUpSpec(state, dim)), onDelta)
+    }
 
-    const question = currentQuestion(state, dim)
+    const question = spoken(currentQuestionSpec(state, dim))
     const isBlockFirst = blockHistory.filter((m) => m.role === 'ai').length === 0
     if (!isBlockFirst) return streamOut(question, onDelta)
+
+    // 整场第一句：先打个招呼；这一周已经聊过一次的话，把手边的记录复述一句
+    if (history.length === 0) {
+      const recap = ctx?.thisWeek?.lines?.length
+        ? `这周你已经聊过一次，记了这些：${ctx.thisWeek.lines[0]}。今天补点什么？\n\n`
+        : ''
+      return streamOut(`${GREETING}${recap}${OPENERS[dim]}${question}`, onDelta)
+    }
     return streamOut(`${OPENERS[dim]}${question}`, onDelta)
   }
 
@@ -376,7 +379,7 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
         ...byDim.event,
         ...byDim.people,
         ...byDim.thing,
-        ...byDim.mood,
+        ...byDim.growth,
         ...byDim.reconcile,
       ]
       const result = createEmptyResult()
@@ -391,6 +394,7 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       result.events = toItems(byDim.event, 4, 50)
       result.people = buildPeople(byDim.people)
       result.things = toItems(byDim.thing, 4)
+      result.growth = toItems(byDim.growth, 3, 50)
       // 上周说好的、这周没落地的，写进「未办」并标明来处
       const fromLastWeek = byDim.reconcile
         .filter((t) => !isNonAnswer(t) && PENDING_RE.test(t))
@@ -404,7 +408,6 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
         ),
       ]).slice(0, 4)
 
-      result.state = buildState(byDim.mood)
       result.highlights = buildHighlights(result, byDim)
       result.nextFocus = buildNextFocus(result)
       result.nextFollowUps = buildFollowUps(result)

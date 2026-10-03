@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { ListKey } from '../core/resultEdit'
 import { countSection } from '../core/outline'
 import { STATE_FIELDS } from '../core/stateFields'
-import { attachScores, withScore } from '../core/stateScore'
+import { attachState, withScore } from '../core/stateScore'
 import type { PersonNote, StateKey, WeeklyResult } from '../core/types'
 import { CollapsibleCard, type CollapsibleKey } from './CollapsibleCard'
 import { EditableList, EditablePeople } from './EditableList'
@@ -33,13 +33,17 @@ export function ResultBody({
 }: Props) {
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
-  const setStateField = (key: StateKey, value: string) =>
-    onResultChange({ ...result, state: { ...result.state, [key]: value } })
+  /** 备注就一行，改它不动分数 */
+  const setStateNote = (note: string) =>
+    onResultChange({
+      ...result,
+      state: attachState(result.state.scores, note),
+    })
   /** 点星：再点同一颗就把这一项拿掉；一项都没了就不写 scores 这个键 */
   const setStateScore = (key: StateKey, value: number | undefined) =>
     onResultChange({
       ...result,
-      state: attachScores(result.state, withScore(result.state.scores, key, value)),
+      state: attachState(withScore(result.state.scores, key, value), result.state.note),
     })
 
   return (
@@ -109,7 +113,7 @@ export function ResultBody({
       <CollapsibleCard
         sectionKey="state"
         title="状态"
-        desc="四行文字各一句，顺手点个 0–5 星 · 想改就直接改"
+        desc="四项各点几颗星 · 想说什么写在下面那一行"
         count={countSection(result, 'state')}
         collapsed={collapsed.state}
         onToggle={() => onToggle('state')}
@@ -118,12 +122,6 @@ export function ResultBody({
           {STATE_FIELDS.map((f) => (
             <div key={f.key} className="state-row">
               <span className="state-label">{f.label}</span>
-              <input
-                className="edit-input"
-                value={result.state[f.key]}
-                placeholder={f.placeholder}
-                onChange={(e) => setStateField(f.key, e.target.value)}
-              />
               <StateScore
                 ariaLabel={`${f.label}评分`}
                 score={result.state.scores?.[f.key]}
@@ -131,7 +129,31 @@ export function ResultBody({
               />
             </div>
           ))}
+          <textarea
+            className="state-note"
+            rows={2}
+            value={result.state.note}
+            placeholder="这周状态想补一句什么…（可以空着）"
+            onChange={(e) => setStateNote(e.target.value)}
+          />
         </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        sectionKey="growth"
+        title="成长"
+        desc="这周长了什么见识、想通了什么（不打分）"
+        count={countSection(result, 'growth')}
+        collapsed={collapsed.growth}
+        onToggle={() => onToggle('growth')}
+      >
+        <EditableList
+          items={result.growth}
+          onChange={setList('growth')}
+          placeholder="看了什么、听了什么、想通了什么…"
+          addLabel="添加一条"
+          emptyText="（这周没聊到成长）"
+        />
       </CollapsibleCard>
 
       <section className="card highlight-card" id="section-highlights">

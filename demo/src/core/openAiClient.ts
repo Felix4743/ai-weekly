@@ -1,7 +1,7 @@
 import type { AiClient, DeltaHandler, TurnResult } from './aiClient'
 import { AiError } from './aiError'
 import type { ChatMessagePayload, ChatTransport } from './chatTransport'
-import { blockProgress, currentQuestion, nextStep } from './interview'
+import { blockProgress, currentQuestionSpec, nextStep } from './interview'
 import { degradedResult, parseResultSafe } from './parseResult'
 import { resolvePersonaPrompt } from './persona'
 import {
@@ -12,7 +12,7 @@ import {
   buildTurnPrompt,
 } from './prompts'
 import { mergeRefined } from './refineMerge'
-import { followUpCap } from './script'
+import { followUpCap, spoken } from './script'
 import { parseTurnReply, stripMarkerForDisplay } from './turn'
 import type {
   AppConfig,
@@ -79,8 +79,10 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       const text = stripMarkerForDisplay(raw, true)
       if (text) return text
 
-      // 模型什么都没说也不能让界面空着：退回参考题目里的问题
-      return progress.complete ? EMPTY_BLOCK_TAIL : currentQuestion(state, dim) || EMPTY_BLOCK_TAIL
+      // 模型什么都没说也不能让界面空着：退回参考题目里的问法
+      return progress.complete
+        ? EMPTY_BLOCK_TAIL
+        : spoken(currentQuestionSpec(state, dim)) || EMPTY_BLOCK_TAIL
     },
 
     async reply(
@@ -110,7 +112,7 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
         if (progress.complete) message = EMPTY_FREE_TAIL
         else {
           const advanced = nextStep(state, dim, action)
-          message = currentQuestion(advanced, dim) || EMPTY_BLOCK_TAIL
+          message = spoken(currentQuestionSpec(advanced, dim)) || EMPTY_BLOCK_TAIL
         }
       }
 
