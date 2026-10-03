@@ -5,6 +5,7 @@ import {
   type WeeklyResult,
   type WeeklyState,
 } from './types'
+import { coerceScores, hasAnyScore } from './stateScore'
 
 export interface ParseOutcome {
   result: WeeklyResult
@@ -59,9 +60,11 @@ function toPeople(value: unknown): PersonNote[] {
 }
 
 /**
- * 状态那一段：四项各一句。
+ * 状态那一段：四项各一句（0.9.2 起还带四项分数）。
  *
  * 容错口径和别处一致 —— 缺项留空、字段名各种叫法都认、模型写成数组也接得住。
+ * 分数只有 1–5 的整数才算数：模型自己编的分也认（读得回来），
+ * 但生成与重新整理两步都会用界面上真实的点击把它盖掉。
  */
 function toState(value: unknown): WeeklyState {
   const out = createEmptyState()
@@ -71,6 +74,8 @@ function toState(value: unknown): WeeklyState {
   out.mood = readString(o.mood ?? o.情绪 ?? o.emotion)
   out.focus = readString(o.focus ?? o.精力 ?? o.专注 ?? o.energy)
   out.growth = readString(o.growth ?? o.心智 ?? o.成长 ?? o.learning)
+  const scores = coerceScores(o.scores ?? o.评分 ?? o.打分)
+  if (hasAnyScore(scores)) out.scores = scores
   return out
 }
 

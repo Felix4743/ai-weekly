@@ -141,7 +141,7 @@ export function buildOpeningPrompt(
   )
   head.push(
     '',
-    '要求：一次只说一句话、问一到三个小问题就好，不要列清单、不要小标题、不要复述区块名称；' +
+    '要求：一次只说一句话（问一到三个小问题也行，别堆成一长串），不要列清单、不要小标题、不要复述区块名称；' +
       '不要评价他做得怎么样，也不要替他说结论。',
   )
 
@@ -167,7 +167,7 @@ export function buildClosingPrompt(
     remaining.length === 0
       ? '四个区块都聊过了，告诉他可以生成这周的梳理了。'
       : next.kind === 'depth'
-        ? '自然地提一句：接着可以聊后面几块，先问一句「我们深度复盘、中度复盘还是快速复盘，可以吗？」'
+        ? '自然地提一句：接着可以聊后面几块，先问一句「想聊细一点、正常聊，还是今天时间紧抓重点？」'
         : next.kind === 'block'
           ? `自然地提一下可以接着聊「${nextLabel}」，` +
             '但**只提块的名称，不要替那一块把问题先问了** —— 他切过去之后会正式问一遍，先问就是重复。'
@@ -213,7 +213,7 @@ export function buildTurnPrompt(
       stage.kind === 'done'
         ? '用 [换块]，给一句自然的收尾，并告诉他可以生成这周的梳理了。'
         : stage.kind === 'depth'
-          ? '用 [换块]，给一句自然的收尾，并问一句「我们深度复盘、中度复盘还是快速复盘，可以吗？」'
+          ? '用 [换块]，给一句自然的收尾，并问一句「想聊细一点、正常聊，还是今天时间紧抓重点？」'
           : '用 [换块]，给一句自然的收尾（后面还有没聊的块，但这一块不用再问了）。'
     return [
       { role: 'system', content: system },
@@ -253,7 +253,7 @@ export function buildTurnPrompt(
     stageAfterBlock.kind === 'done'
       ? '用 [换块] 时，给一句自然的收尾，并告诉他可以生成这周的梳理了。'
       : stageAfterBlock.kind === 'depth'
-        ? '用 [换块] 时，这句话末尾要补一句：「我们深度复盘、中度复盘还是快速复盘，可以吗？」然后就停住，等他挑，不要自己替他挑。'
+        ? '用 [换块] 时，这句话末尾要补一句：「想聊细一点、正常聊，还是今天时间紧抓重点？」然后就停住，等他挑，不要自己替他挑。'
         : `用 [换块] 时，用一句自然的话过渡到「${dimensionScript(stageAfterBlock.dim)?.label ?? '下一块'}」，但不要替那一块把问题先问了。`
 
   const advanceInstruction = blockWillFinish
@@ -289,7 +289,7 @@ export function buildTurnPrompt(
     `- 用 [换题] 时，${advanceInstruction}`,
     ...(blockWillFinish ? [] : [`- ${blockTail}`]),
     '',
-    '要求：一次只说一句话、问一到三个小问题就好，不要堆成一长串；' +
+    '要求：一次只说一句话（问一到三个小问题也行），不要堆成一长串；' +
       '采访阶段保持中立，不评价、不说教、不替他下结论。',
   ].join('\n')
 

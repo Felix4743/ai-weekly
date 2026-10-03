@@ -50,6 +50,26 @@ describe('模型结果解析', () => {
     expect(r.state).toEqual({ body: '睡得还行', mood: '有点悬', focus: '', growth: '' })
   })
 
+  it('状态里的分数读得回来，中文键「评分」也认', () => {
+    const r = parseResult(
+      '{"状态":{"身体":"睡得还行","评分":{"body":4,"mood":2}}}',
+    )
+    expect(r.state.scores).toEqual({ body: 4, mood: 2 })
+  })
+
+  it('没有分数的老档不冒充 0 分：整个键都不出现', () => {
+    const r = parseResult('{"状态":{"身体":"睡得还行"}}')
+    expect('scores' in r.state).toBe(false)
+  })
+
+  it('分数不合法就丢掉那一项，文字照留', () => {
+    const r = parseResult(
+      '{"状态":{"情绪":"有点悬","scores":{"mood":0,"body":9,"focus":3}}}',
+    )
+    expect(r.state.mood).toBe('有点悬')
+    expect(r.state.scores).toEqual({ focus: 3 })
+  })
+
   it('people 允许是字符串数组', () => {
     const r = parseResult('{"people":["老王","小李"]}')
     expect(r.people).toEqual([

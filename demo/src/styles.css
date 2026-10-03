@@ -606,6 +606,11 @@ body {
   animation: rise 0.28s ease both;
 }
 
+/* 一条消息连同它下面可能挂的东西（状态那段回答底下的星星） */
+.msg-block {
+  width: 100%;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -1234,6 +1239,58 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
   background: #fff;
+}
+
+/* ---------- 状态评分：一排 0–5 星 ---------- */
+
+.state-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* 采访里挂在回答下面：缩进到气泡那一列，跟聊天气泡对齐 */
+.msg-block > .state-score {
+  margin: 4px 0 12px 36px;
+}
+
+.state-score-label {
+  color: var(--ink-3);
+}
+
+.stars {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.star {
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--line);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.star:hover:not(:disabled),
+.star.on {
+  color: var(--warm);
+}
+
+.star:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.state-score-value {
+  min-width: 3.6em;
+  font-variant-numeric: tabular-nums;
 }
 
 .badge-ai {

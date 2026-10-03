@@ -10,8 +10,10 @@ import {
   nextStep,
   openBlock,
   setDepth,
+  stateKeyForAnswer,
 } from './core/interview'
 import { sampleAnswer } from './core/mockAi'
+import { attachScores, withScore } from './core/stateScore'
 import { stripMarkerForDisplay } from './core/turn'
 import {
   createDefaultConfig,
@@ -22,6 +24,8 @@ import {
   type Dimension,
   type InterviewContext,
   type InterviewState,
+  type StateKey,
+  type StateScores,
   type WeeklyResult,
 } from './core/types'
 import { addWeeks, weekKeyOf, type WeekKey } from './core/week'
@@ -88,6 +92,8 @@ export default function App() {
   const [resultWeek, setResultWeek] = useState<WeekKey>(() => weekKeyOf(new Date()))
   /** 从哪一页点进设置的：回去时要还给他，改设置不该等于重开 */
   const [cameFrom, setCameFrom] = useState<Page | null>(null)
+  /** 状态四项的分数：采访里点出来的，出结果时贴到结果上 */
+  const [stateScores, setStateScores] = useState<StateScores>({})
 
   // 填了 Key 就是真模型，没填就用假 AI 走通流程
   const { client: ai, mode } = useMemo(
@@ -100,6 +106,7 @@ export default function App() {
   const resultRef = useRef<WeeklyResult | null>(null)
   const archiveRef = useRef<WeekEntry[]>(archive)
   const resultWeekRef = useRef<WeekKey>(resultWeek)
+  const stateScoresRef = useRef<StateScores>(stateScores)
   const busyRef = useRef(false)
   const streamRef = useRef('')
   const flushTimer = useRef<number | null>(null)
@@ -123,6 +130,11 @@ export default function App() {
   const commitResultWeek = useCallback((week: WeekKey) => {
     resultWeekRef.current = week
     setResultWeek(week)
+  }, [])
+
+  const commitScores = useCallback((next: StateScores) => {
+    stateScoresRef.current = next
+    setStateScores(next)
   }, [])
 
   /**
@@ -199,6 +211,8 @@ export default function App() {
     resultRef.current = null
     setResult(null)
     setRestored(false)
+    // 新的一轮：上一轮点过的星不能跟着过来
+    commitScores({})
     // 新的一轮从今天算起；上一份结果属于哪一周，到这里为止
     commitResultWeek(weekKeyOf(new Date()))
     setPage('chat')
@@ -214,7 +228,7 @@ export default function App() {
       setTyping(false)
       busyRef.current = false
     }
-  }, [ai, commitInterview, commitMessages, commitResultWeek, interviewContext, pushDelta, resetStream])
+  }, [ai, commitInterview, commitMessages, commitResultWeek, commitScores, interviewContext, pushDelta, resetStream])
 
   // 首次挂载：若已配置过则直接进入对话
   const bootedRef = useRef(false)
@@ -230,9 +244,11 @@ export default function App() {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
     try {
       const r = await ai.summarize(messagesRef.current, interviewContext())
+      // 分数以界面上真实点过的为准：模型压根没让它打分，它自己编的也在这儿被盖掉
+      const merged: WeeklyResult = { ...r, state: attachScores(r.state, stateScoresRef.current) }
       // 生成的那一刻定下它属于哪一周 —— 之后再编辑、重新整理都跟着这一周走
       commitResultWeek(weekKeyOf(new Date()))
-      commitResult(r)
+      commitResult(merged)
       setError(null)
       setPage('result')
     } catch (err) {
@@ -283,9 +299,13 @@ export default function App() {
       setTyping(true)
       resetStream()
 
+      // 状态那一段的回答，按「这道题是四项里的哪一项」挂上键：
+      // 界面据此在这一条下面放一排星（问完一段点一次）
+      const stateKey = dim === 'mood' ? stateKeyForAnswer(interviewRef.current) : undefined
+
       commitMessages([
         ...messagesRef.current,
-        { id: nextId('u'), role: 'user', text, dimension: dim, at: Date.now() },
+        { id: nextId('u'), role: 'user', text, dimension: dim, stateKey, at: Date.now() },
       ])
 
       try {
@@ -361,6 +381,22 @@ export default function App() {
     [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
+  /**
+   * 用户在状态那段点了星。
+   *
+   * 改的是「这一轮采访」的分数；要是结果已经出来了（从结果页又退回采访接着聊），
+   * 同一笔改动也得落到那份结果上，否则两边会不一致。
+   */
+  const handleScoreState = useCallback(
+    (key: StateKey, value: number | undefined) => {
+      const next = withScore(stateScoresRef.current, key, value)
+      commitScores(next)
+      const current = resultRef.current
+      if (current) commitResult({ ...current, state: attachScores(current.state, next) })
+    },
+    [commitResult, commitScores],
+  )
+
   const handleGenerate = useCallback(async () => {
     if (busyRef.current) return
     busyRef.current = true
@@ -433,9 +469,11 @@ export default function App() {
     // 恢复的是哪一周的结果，就接着算哪一周：否则改两笔就会串到本周名下
     commitResultWeek(saved.week)
     commitMessages(saved.messages)
+    // 上次点过的星也在那份结果里：恢复出来，采访里接着改才对得上
+    commitScores(saved.result.state?.scores ?? {})
     setRestored(true)
     setPage('result')
-  }, [commitMessages, commitResultWeek])
+  }, [commitMessages, commitResultWeek, commitScores])
 
   const handleRestart = useCallback(() => {
     void startInterview()
@@ -503,9 +541,11 @@ export default function App() {
           busy={overlay !== null}
           sampleText={sampleText}
           hasAnyAnswer={hasAnyAnswer}
+          stateScores={stateScores}
           onOpenBlock={handleOpenBlock}
           onSend={handleSend}
           onPickDepth={handlePickDepth}
+          onScoreState={handleScoreState}
           onGenerate={handleGenerate}
         />
       )}

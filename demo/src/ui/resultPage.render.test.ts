@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { countSection } from '../core/outline'
 import { createEmptyResult, createEmptyState, type ChatMessage, type WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED } from './CollapsibleCard'
+import { StateScore } from './StateScore'
 import { ResultBody } from './ResultBody'
 import { ResultPage } from './ResultPage'
 
@@ -243,5 +244,187 @@ describe('状态卡（0.9.1 新增的第八栏）', () => {
       focus: '',
       growth: '把《长日将尽》读完了',
     })
+  })
+})
+
+describe('状态评分（0.9.2 的星星）', () => {
+  /**
+   * 结果页那四排星。
+   *
+   * 星星按钮在 `StateScore` 里面，元素树走不到（函数组件没被调用），
+   * 所以这里按「四排星的组件」认人，点星的动作交给下面那组直接测 StateScore。
+   */
+  function scoreRows(tree: ReactNode): ReactElement[] {
+    const out: ReactElement[] = []
+    forEachElement(tree, (el) => {
+      if (el.type === StateScore) out.push(el)
+    })
+    return out
+  }
+
+  function bodyTree(current: WeeklyResult, onChange: (next: WeeklyResult) => void = () => {}) {
+    return ResultBody({
+      result: current,
+      onResultChange: onChange,
+      collapsed: { ...ALL_COLLAPSED, state: false },
+      onToggle: () => {},
+    })
+  }
+
+  it('四项各一排五颗星，没打分时写「未打分」，一颗都不亮', () => {
+    const html = renderBody(result)
+    expect(html.match(/class="star"/g)).toHaveLength(20)
+    expect(html.match(/class="star on"/g)).toBeNull()
+    expect(html.match(/未打分/g)).toHaveLength(4)
+    // 每排 5 颗，按钮上的名字带得出是哪一项
+    for (const label of STATE_LABELS) {
+      expect(html).toContain(`aria-label="${label}评分 5 星"`)
+    }
+  })
+
+  it('点过的项点亮对应颗数，并把分数写在旁边', () => {
+    const html = renderBody({
+      ...result,
+      state: { ...result.state, scores: { body: 4, focus: 2 } },
+    })
+    // 4 + 2 颗亮着
+    expect(html.match(/class="star on"/g)).toHaveLength(6)
+    expect(html).toContain('4 / 5')
+    expect(html).toContain('2 / 5')
+    // 另外两项还是「未打分」
+    expect(html.match(/未打分/g)).toHaveLength(2)
+  })
+
+  it('点第 N 颗就是 N 分，只动这一项，文字不动', () => {
+    const calls: WeeklyResult[] = []
+    const rows = scoreRows(bodyTree(result, (next) => calls.push(next)))
+    expect(rows).toHaveLength(4)
+    // 第二排是「情绪」
+    rows[1].props.onChange(3)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].state).toEqual({
+      body: '睡得还行',
+      mood: '有点烦',
+      focus: '',
+      growth: '',
+      scores: { mood: 3 },
+    })
+    expect(calls[0].events).toEqual(result.events)
+    expect(calls[0].highlights).toEqual(result.highlights)
+  })
+
+  it('再点同一颗取消：这一项的分数整个不出现，而不是变成 0 分', () => {
+    const scored: WeeklyResult = {
+      ...result,
+      state: { ...result.state, scores: { mood: 3 } },
+    }
+    const calls: WeeklyResult[] = []
+    const rows = scoreRows(bodyTree(scored, (next) => calls.push(next)))
+    expect(rows[1].props.score).toBe(3)
+
+    rows[1].props.onChange(undefined)
+
+    expect(calls).toHaveLength(1)
+    expect('scores' in calls[0].state).toBe(false)
+    // 文字一直留着，不受点星影响
+    expect(calls[0].state.mood).toBe('有点烦')
+  })
+
+  it('四排星各认自己那一项，分不会串行', () => {
+    const calls: WeeklyResult[] = []
+    const rows = scoreRows(bodyTree(result, (next) => calls.push(next)))
+    expect(rows.map((r) => r.props.ariaLabel)).toEqual([
+      '身体评分',
+      '情绪评分',
+      '精力评分',
+      '心智评分',
+    ])
+
+    rows[3].props.onChange(5)
+    expect(calls[0].state.scores).toEqual({ growth: 5 })
+    expect(calls[0].state.scores?.body).toBeUndefined()
+  })
+
+  it('旧档没有分数：四排星都还是「没点过」的样子', () => {
+    const legacy: WeeklyResult = { ...result, state: createEmptyState() }
+    const rows = scoreRows(bodyTree(legacy))
+    expect(rows.map((r) => r.props.score)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+    const html = renderBody(legacy)
+    expect(html.match(/未打分/g)).toHaveLength(4)
+    expect(html.match(/class="star on"/g)).toBeNull()
+    expect(html).not.toContain('0 / 5')
+  })
+})
+
+/**
+ * 点星这套规则本身（采访页与结果页共用同一个组件）。
+ * 组件是函数式的、没有 hooks，所以直接调用它拿元素树来点，不必凑 jsdom。
+ */
+describe('一排星的点击规则', () => {
+  function starButtons(
+    score: number | undefined,
+    onChange: (value: number | undefined) => void = () => {},
+  ): ReactElement[] {
+    const tree = StateScore({ label: '这周的情绪', score, onChange })
+    const out: ReactElement[] = []
+    forEachElement(tree, (el) => {
+      if (el.type === 'button') out.push(el)
+    })
+    return out
+  }
+
+  it('五颗星都在，名字带上这一项', () => {
+    const stars = starButtons(undefined)
+    expect(stars).toHaveLength(5)
+    expect(stars.map((el) => el.props['aria-label'])).toEqual([
+      '这周的情绪 1 星',
+      '这周的情绪 2 星',
+      '这周的情绪 3 星',
+      '这周的情绪 4 星',
+      '这周的情绪 5 星',
+    ])
+  })
+
+  it('点第 N 颗就传 N 分', () => {
+    const calls: (number | undefined)[] = []
+    starButtons(undefined, (v) => calls.push(v))[2].props.onClick()
+    expect(calls).toEqual([3])
+  })
+
+  it('点同一颗是取消，传 undefined 而不是 0', () => {
+    const calls: (number | undefined)[] = []
+    starButtons(3, (v) => calls.push(v))[2].props.onClick()
+    expect(calls).toEqual([undefined])
+  })
+
+  it('改点别的颗就是改分', () => {
+    const calls: (number | undefined)[] = []
+    const stars = starButtons(3, (v) => calls.push(v))
+    stars[4].props.onClick()
+    stars[0].props.onClick()
+    expect(calls).toEqual([5, 1])
+  })
+
+  it('传了 disabled 时五颗都点不动', () => {
+    const stars = starButtons(2)
+    expect(stars.map((el) => el.props.disabled)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+    const off = StateScore({ label: '这周的情绪', score: 2, disabled: true, onChange: () => {} })
+    const disabled: ReactElement[] = []
+    forEachElement(off, (el) => {
+      if (el.type === 'button') disabled.push(el)
+    })
+    expect(disabled.map((el) => el.props.disabled)).toEqual([true, true, true, true, true])
   })
 })

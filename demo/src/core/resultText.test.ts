@@ -98,6 +98,31 @@ describe('结果导出为 Markdown', () => {
     expect(md.split('## 状态')[1].split('## 本周主线')[0]).toContain('- （无）')
   })
 
+  it('点过星的那几项，分数跟在文字后面', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      state: { ...FULL.state, scores: { body: 4, growth: 5 } },
+    })
+    expect(md).toContain('- 身体：睡得还行（4 / 5）')
+    expect(md).toContain('- 心智：读了半本书（5 / 5）')
+    // 没打分的那两项不硬编一个分
+    expect(md).toContain('- 情绪：这周一直悬着')
+    expect(md).toContain('- 精力：上午最好')
+    expect(md).not.toContain('- 情绪：这周一直悬着（')
+  })
+
+  it('只点了星、一个字没写的那项也留在导出的稿子里', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      state: { body: '', mood: '  ', focus: '', growth: '', scores: { mood: 3 } },
+    })
+    const section = md.split('## 状态')[1].split('## 本周主线')[0]
+    expect(section).toContain('- 情绪：3 / 5')
+    expect(section).not.toContain('- （无）')
+    // 既没文字也没分的那几项不出现
+    expect(section).not.toContain('- 身体：')
+  })
+
   it('空结果用占位符而不是空白，保证可复制', () => {
     const md = resultToMarkdown(EMPTY)
     expect(md).toContain('（无）')

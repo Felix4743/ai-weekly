@@ -18,6 +18,7 @@ import {
   openBlock,
   questionsInBlock,
   setDepth,
+  stateKeyForAnswer,
 } from './interview'
 import {
   CONTENT_BLOCKS,
@@ -29,6 +30,7 @@ import {
   followUpCap,
 } from './script'
 import type { BlockProgress, Dimension, InterviewState, TurnAction } from './types'
+import { STATE_KEYS } from './types'
 
 const EMPTY: BlockProgress = { askIndex: 0, followUpCount: 0, complete: false, freeTurns: 0 }
 
@@ -284,5 +286,35 @@ describe('分块采访状态机', () => {
     expect(nextStep(wild, unknown, 'followup')).toBe(wild)
     expect(questionsInBlock(unknown)).toBe(0)
     expect(answeredInBlock(wild, unknown)).toBe(0)
+  })
+})
+
+/**
+ * 状态那一段的四道题与四项评分一一对应，界面靠这个关系决定
+ * 「这一条回答下面挂哪一排星」——错了就会把「精力」的分记到「情绪」上。
+ */
+describe('状态评分 · 回答与四项的对应', () => {
+  it('按顺序：身体 → 情绪 → 精力 → 心智', () => {
+    let s = createInterview()
+    const keys: (string | undefined)[] = []
+    for (let i = 0; i < 4; i++) {
+      keys.push(stateKeyForAnswer(s))
+      s = nextStep(s, 'mood', 'next')
+    }
+    expect(keys).toEqual([...STATE_KEYS])
+  })
+
+  it('四道题都问完之后就没有对应项了（自由聊的话不归哪一项）', () => {
+    let s = createInterview()
+    for (let i = 0; i < 4; i++) s = nextStep(s, 'mood', 'next')
+    expect(isFreeChat(s, 'mood')).toBe(true)
+    expect(stateKeyForAnswer(s)).toBeUndefined()
+    // 再多说几句也还是 undefined
+    s = nextStep(s, 'mood', 'next')
+    expect(stateKeyForAnswer(s)).toBeUndefined()
+  })
+
+  it('状态与其他区块的题数一致 —— 谁改短了都会在这里被拦住', () => {
+    expect(STATE_KEYS).toHaveLength(dimensionScript('mood')?.mainQuestions.length ?? 0)
   })
 })

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { CONTENT_BLOCKS, DEPTHS, dimensionLabel, dimensionScript } from '../core/script'
+import { stateField } from '../core/stateFields'
 import {
   answeredInBlock,
   isAllComplete,
@@ -7,7 +8,8 @@ import {
   nextStage,
   questionsInBlock,
 } from '../core/interview'
-import type { ChatMessage, Depth, Dimension, InterviewState } from '../core/types'
+import type { ChatMessage, Depth, Dimension, InterviewState, StateKey, StateScores } from '../core/types'
+import { StateScore } from './StateScore'
 
 interface Props {
   messages: ChatMessage[]
@@ -19,10 +21,14 @@ interface Props {
   busy: boolean
   sampleText: string
   hasAnyAnswer: boolean
+  /** 状态四项的分数：采访里点过的那些，点完还能改 */
+  stateScores: StateScores
   onOpenBlock: (dim: Dimension) => void
   onSend: (text: string) => void
   /** 用户点了深度 / 中度 / 快速复盘 */
   onPickDepth: (depth: Depth) => void
+  /** 用户在状态那段回答下面点了星 */
+  onScoreState: (key: StateKey, value: number | undefined) => void
   onGenerate: () => void
 }
 
@@ -35,9 +41,11 @@ export function ChatPage({
   busy,
   sampleText,
   hasAnyAnswer,
+  stateScores,
   onOpenBlock,
   onSend,
   onPickDepth,
+  onScoreState,
   onGenerate,
 }: Props) {
   const [draft, setDraft] = useState('')
@@ -151,12 +159,26 @@ export function ChatPage({
             <p className="block-empty">正在准备第一个问题…</p>
           )}
 
-          {blockMessages.map((m) => (
-            <div key={m.id} className={`msg ${m.role}`}>
-              {m.role === 'ai' && <span className="avatar" aria-hidden="true" />}
-              <div className="bubble">{m.text}</div>
-            </div>
-          ))}
+          {blockMessages.map((m) => {
+            const field = m.stateKey ? stateField(m.stateKey) : undefined
+            return (
+              <div key={m.id} className="msg-block">
+                <div className={`msg ${m.role}`}>
+                  {m.role === 'ai' && <span className="avatar" aria-hidden="true" />}
+                  <div className="bubble">{m.text}</div>
+                </div>
+                {/* 状态那一段：问完一项就在自己的回答下面点一次星，翻回去还能改 */}
+                {field && (
+                  <StateScore
+                    label={field.ask}
+                    score={stateScores[field.key]}
+                    disabled={busy}
+                    onChange={(v) => onScoreState(field.key, v)}
+                  />
+                )}
+              </div>
+            )
+          })}
 
           {typing && streamText && (
             <div className="msg ai">

@@ -83,6 +83,22 @@ describe('重新整理的结果合并', () => {
     expect(fromModel.events).toEqual(['B'])
   })
 
+  it('点过的星不会被「重新整理」洗掉', () => {
+    const current = result({ state: { body: '睡得还行', mood: '', focus: '', growth: '', scores: { body: 4 } } })
+    const fromModel = result({ state: { body: '模型重写的身体', mood: '', focus: '', growth: '' } })
+    const merged = mergeRefined(current, fromModel)
+    // 文字按前几条例子的规矩来，分是界面点的，模型编不出来也不该丢
+    expect(merged.state.scores).toEqual({ body: 4 })
+  })
+
+  it('一直没点过星时，重新整理后也不多出一个空的 scores', () => {
+    const merged = mergeRefined(
+      result({ state: { body: '睡得还行', mood: '', focus: '', growth: '' } }),
+      createEmptyResult(),
+    )
+    expect('scores' in merged.state).toBe(false)
+  })
+
   it('空清单一律给空数组，不留 undefined', () => {
     const merged = mergeRefined(createEmptyResult(), createEmptyResult())
     expect(merged.events).toEqual([])

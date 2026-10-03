@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react'
 import type { ListKey } from '../core/resultEdit'
 import { countSection } from '../core/outline'
-import type { PersonNote, WeeklyResult, WeeklyState } from '../core/types'
+import { STATE_FIELDS } from '../core/stateFields'
+import { attachScores, withScore } from '../core/stateScore'
+import type { PersonNote, StateKey, WeeklyResult } from '../core/types'
 import { CollapsibleCard, type CollapsibleKey } from './CollapsibleCard'
 import { EditableList, EditablePeople } from './EditableList'
+import { StateScore } from './StateScore'
 
 /**
  * 一份结果的正文：五栏清单（可折叠）+ 本周主线 + 下周计划。
@@ -11,14 +14,6 @@ import { EditableList, EditablePeople } from './EditableList'
  * 结果页和总览页共用它 —— 两边看的是同一份结构，区别只在于
  * 「改的是本周」还是「改的是某一周的存档」，以及下周计划卡片底部多不多一块东西。
  */
-
-/** 状态那一段的四行：0.9.1 只存文字，不打分 */
-const STATE_FIELDS: { key: keyof WeeklyState; label: string; placeholder: string }[] = [
-  { key: 'body', label: '身体', placeholder: '睡眠、运动、吃饭…' },
-  { key: 'mood', label: '情绪', placeholder: '这周心里怎么样…' },
-  { key: 'focus', label: '精力', placeholder: '什么时候状态最好…' },
-  { key: 'growth', label: '心智', placeholder: '读了什么、学到什么…' },
-]
 
 interface Props {
   result: WeeklyResult
@@ -38,8 +33,14 @@ export function ResultBody({
 }: Props) {
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
-  const setStateField = (key: keyof WeeklyState, value: string) =>
+  const setStateField = (key: StateKey, value: string) =>
     onResultChange({ ...result, state: { ...result.state, [key]: value } })
+  /** 点星：再点同一颗就把这一项拿掉；一项都没了就不写 scores 这个键 */
+  const setStateScore = (key: StateKey, value: number | undefined) =>
+    onResultChange({
+      ...result,
+      state: attachScores(result.state, withScore(result.state.scores, key, value)),
+    })
 
   return (
     <>
@@ -108,14 +109,14 @@ export function ResultBody({
       <CollapsibleCard
         sectionKey="state"
         title="状态"
-        desc="身体、情绪、精力、心智各一句 · 想改就直接改"
+        desc="四行文字各一句，顺手点个 0–5 星 · 想改就直接改"
         count={countSection(result, 'state')}
         collapsed={collapsed.state}
         onToggle={() => onToggle('state')}
       >
         <div className="state-form">
           {STATE_FIELDS.map((f) => (
-            <label key={f.key} className="state-row">
+            <div key={f.key} className="state-row">
               <span className="state-label">{f.label}</span>
               <input
                 className="edit-input"
@@ -123,7 +124,12 @@ export function ResultBody({
                 placeholder={f.placeholder}
                 onChange={(e) => setStateField(f.key, e.target.value)}
               />
-            </label>
+              <StateScore
+                ariaLabel={`${f.label}评分`}
+                score={result.state.scores?.[f.key]}
+                onChange={(v) => setStateScore(f.key, v)}
+              />
+            </div>
           ))}
         </div>
       </CollapsibleCard>

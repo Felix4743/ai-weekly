@@ -22,6 +22,13 @@ export interface ChatMessage {
   text: string
   /** 这条消息所属的采访区块；用户消息继承所回答问题的区块 */
   dimension: Dimension
+  /**
+   * 这条回答对应状态四项里的哪一项。只在状态块里有值。
+   *
+   * 界面据此把一排星星挂在这条回答下面 —— 「问完一段就点一次」，
+   * 分数跟的是**那条回答**，所以换了块、翻回去看历史都还能改。
+   */
+  stateKey?: StateKey
   at: number
 }
 
@@ -80,10 +87,23 @@ export interface InterviewContext {
 }
 
 /**
- * 状态那一段：四项各一句纯文字。
+ * 状态四项的键；**顺序 = 状态块四道主问题的顺序**
+ * （见 `script.ts` 里 `mood.mainQuestions`，script.test.ts 钉着这两边等长）。
+ */
+export const STATE_KEYS = ['body', 'mood', 'focus', 'growth'] as const
+
+export type StateKey = (typeof STATE_KEYS)[number]
+
+/**
+ * 状态打分：每项 1–5 星，**没打分就没有这个键**（0 星 = 用户点掉了那颗星）。
  *
- * 刻意**不存分数** —— 打分只有等以后做出趋势页才值钱，
- * 现在先留着位置：以后加 `scores?: { body?: number; ... }` 即可，旧档补空就行。
+ * 分数只由界面产生 —— 提示词里没让模型打分，就算它自己编了一组，
+ * 生成那一步也会被界面上真实的点击覆盖掉（见 `stateScore.attachScores`）。
+ */
+export type StateScores = Partial<Record<StateKey, number>>
+
+/**
+ * 状态那一段：四项各一句文字（0.9.2 起每项还可以点一个 0–5 星的分）。
  */
 export interface WeeklyState {
   /** 身体 */
@@ -94,6 +114,13 @@ export interface WeeklyState {
   focus: string
   /** 心智（成长） */
   growth: string
+  /**
+   * 四项各一个 1–5 星的分；一项都没打分时整个键不出现。
+   *
+   * 旧档（0.9.1 及以前）没有这个键，读回来就是 undefined —— 界面显示「未打分」，
+   * 不冒充 0 分。
+   */
+  scores?: StateScores
 }
 
 export function createEmptyState(): WeeklyState {

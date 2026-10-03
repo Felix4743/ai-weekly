@@ -176,13 +176,13 @@ function cloneResult(r: WeeklyResult): WeeklyResult {
     highlights: [...r.highlights],
     nextFocus: [...r.nextFocus],
     nextFollowUps: [...r.nextFollowUps],
-    state: { ...r.state },
+    state: { ...r.state, scores: r.state.scores ? { ...r.state.scores } : undefined },
   }
 }
 
 /**
  * 状态四项：状态块的回答按顺序落进 身体 / 情绪 / 精力 / 心智。
- * 0.9.1 只存文字，不打分（分数与趋势按用户要求留到以后）。
+ * 只写文字 —— 分数是用户点出来的，不在模型的活儿里（见 stateScore.ts）。
  */
 function buildState(answers: string[]): WeeklyState {
   const clean = answers.filter((t) => !isNonAnswer(t))

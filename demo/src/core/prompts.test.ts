@@ -91,7 +91,7 @@ describe('提示词 · 对话记录', () => {
 describe('提示词 · 区块开场与收尾', () => {
   it('第一块（状态）带打招呼的指示，并给出参考题目', () => {
     const text = textOf(buildOpeningPrompt(openBlock(createInterview(), 'mood'), 'mood', [], PERSONA))
-    expect(text).toContain('这周睡眠、运动和吃饭怎么样')
+    expect(text).toContain('这周身体怎么样')
     expect(text).toContain('打个招呼')
   })
 
@@ -108,7 +108,7 @@ describe('提示词 · 区块开场与收尾', () => {
         PERSONA,
       ),
     )
-    expect(text).toContain('这周买了什么')
+    expect(text).toContain('这周买了点什么')
     expect(text).toContain('自然的话过渡')
     expect(text).not.toContain('打个招呼')
   })
@@ -116,7 +116,7 @@ describe('提示词 · 区块开场与收尾', () => {
   it('把参考题目和追问池都交给模型，覆盖才不会被漏掉', () => {
     const text = textOf(buildOpeningPrompt(openBlock(createInterview(), 'mood'), 'mood', [], PERSONA))
     expect(text).toContain('参考题目（仅供参考，不是必须逐条念）')
-    expect(text).toContain('这周有什么输入')
+    expect(text).toContain('这周看了什么')
     expect(text).toContain('追问池（说到才追，不硬问）')
   })
 
@@ -174,7 +174,7 @@ describe('提示词 · 区块开场与收尾', () => {
   it('状态聊完、还没定档时，收尾会问要哪一档深度', () => {
     const state = done(stateWith({}, { hasLastWeek: false, active: 'mood' }), 'mood')
     const text = textOf(buildClosingPrompt(state, 'mood', PERSONA))
-    expect(text).toContain('深度复盘、中度复盘还是快速复盘')
+    expect(text).toContain('想聊细一点、正常聊，还是今天时间紧抓重点')
   })
 
   it('四块都聊完时提示可以生成梳理', () => {
@@ -242,7 +242,7 @@ describe('提示词 · 一轮追问判断', () => {
       buildTurnPrompt(openBlock(createInterview(), 'event'), 'event', history, PERSONA),
     )
     expect(text).toContain('自然地过渡到下一个参考题目')
-    expect(text).toContain('有没有本来打算做、结果没做成的事')
+    expect(text).toContain('有没有本来打算做、最后没动的事')
   })
 
   it('这一块参考题目问完时改成收尾，并指向下一块', () => {
@@ -266,7 +266,7 @@ describe('提示词 · 一轮追问判断', () => {
       { hasLastWeek: false, active: 'mood' },
     )
     const text = textOf(buildTurnPrompt(state, 'mood', history, PERSONA))
-    expect(text).toContain('深度复盘、中度复盘还是快速复盘')
+    expect(text).toContain('想聊细一点、正常聊，还是今天时间紧抓重点')
   })
 
   it('主问题聊完之后转成自由聊：不再念题目，只剩 [追问]/[换块]', () => {

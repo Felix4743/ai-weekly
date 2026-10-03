@@ -1,4 +1,6 @@
 import { createEmptyState, type WeeklyResult } from './types'
+import { STATE_FIELDS } from './stateFields'
+import { scoreSuffix, scoreText } from './stateScore'
 
 function bulletList(lines: string[], items: string[], empty = '（无）'): void {
   if (items.length === 0) {
@@ -39,20 +41,22 @@ export function resultToMarkdown(r: WeeklyResult): string {
   lines.push('')
 
   lines.push('## 状态', '')
-  // 0.9.1 才有的第八栏。旧结果从归档读回来时会被补成四个空串，
+  // 0.9.1 才有的第八栏（0.9.2 起还带四项分数）。旧结果从归档读回来时文字会被补成空串，
   // 这里再兜一次底，免得「复制全文」在一个老对象上崩掉。
   const st = r.state ?? createEmptyState()
-  const stateRows: [string, string][] = [
-    ['身体', st.body],
-    ['情绪', st.mood],
-    ['精力', st.focus],
-    ['心智', st.growth],
-  ]
-  const filled = stateRows.filter(([, text]) => text.trim().length > 0)
-  if (filled.length === 0) {
+  const rows = STATE_FIELDS.map((f) => ({
+    label: f.label,
+    text: (st[f.key] ?? '').trim(),
+    score: st.scores?.[f.key],
+  })).filter((row) => row.text.length > 0 || row.score !== undefined)
+
+  if (rows.length === 0) {
     lines.push('- （无）')
   } else {
-    for (const [label, text] of filled) lines.push(`- ${label}：${text.trim()}`)
+    for (const row of rows) {
+      if (row.text) lines.push(`- ${row.label}：${row.text}${scoreSuffix(row.score)}`)
+      else lines.push(`- ${row.label}：${scoreText(row.score)}`)
+    }
   }
   lines.push('')
 

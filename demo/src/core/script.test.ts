@@ -114,8 +114,9 @@ describe('采访脚本 · 三档深度', () => {
       expect(d.minutes).toBeGreaterThan(0)
       expect(d.followUpCap).toBeGreaterThan(0)
     }
-    expect(depthSpec('mid')?.phrase).toContain('中度复盘')
-    expect(depthSpec('fast')?.phrase).toContain('快速复盘')
+    expect(depthSpec('deep')?.phrase).toContain('聊细')
+    expect(depthSpec('mid')?.phrase).toContain('正常聊')
+    expect(depthSpec('fast')?.phrase).toContain('抓重点')
   })
 
   it('FOLLOWUP_CAPS 与 DEPTHS 里写的上限完全一致', () => {

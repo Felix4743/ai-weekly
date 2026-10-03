@@ -135,7 +135,7 @@ describe('真实模型客户端 · 一轮回复', () => {
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
     expect(turn.action).toBe('followup')
-    expect(turn.message).toContain('这周主要忙了些什么')
+    expect(turn.message).toContain('这周主要在忙什么')
   })
 
   it('一次请求就够了：带上模型名、完整对话与进度信息', async () => {
@@ -229,7 +229,7 @@ describe('真实模型客户端 · 区块开场', () => {
     const { transport } = scriptedTransport(['   '])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     expect(await ai.nextMessage(openBlock(createInterview(), 'thing'), 'thing', [])).toContain(
-      '这周买了什么',
+      '这周买了点什么',
     )
   })
 })

@@ -11,8 +11,10 @@ import type {
   Depth,
   Dimension,
   InterviewState,
+  StateKey,
   TurnAction,
 } from './types'
+import { STATE_KEYS } from './types'
 
 export type { TurnAction }
 
@@ -70,6 +72,20 @@ export function currentFollowUp(s: InterviewState, dim: Dimension): string {
 /** 当前这一问是不是追问（用于让 AI 区分「换题」和「深挖」） */
 export function isFollowUpTurn(s: InterviewState, dim: Dimension): boolean {
   return blockProgress(s, dim).followUpCount > 0
+}
+
+/**
+ * 状态那一段：刚回答的这句对应四项里的哪一项。
+ *
+ * 状态块的参考问题与 `STATE_KEYS` 一一对应（身体 / 情绪 / 精力 / 心智），
+ * 所以按 `askIndex` 就能算出这一条回答该挂哪一排星。
+ * 四道题都问完（含自由聊）之后返回 undefined —— 那时候要说的话不归哪一项。
+ */
+export function stateKeyForAnswer(s: InterviewState): StateKey | undefined {
+  const p = blockProgress(s, 'mood')
+  // 四道题问完之后 askIndex 停在 3 上，这时得看 complete，不然自由聊的话会被算到「心智」头上
+  if (p.complete) return undefined
+  return STATE_KEYS[p.askIndex]
 }
 
 /* ---------------- 深度档位 ---------------- */
