@@ -317,7 +317,9 @@ describe('真模型试跑台', () => {
               marker: markerOf(call?.raw ?? ''),
               ms: call?.ms,
             })
-            state = nextStep(state, dim, turn.action)
+            // 覆盖要一起交回去：不然试跑台这边的状态永远「一样都没聊到」，
+            // 跟 App 里的真实推进不一致（App 会把 covered 记下来做收尾对账）
+            state = nextStep(state, dim, turn.action, { covered: turn.covered })
             say('ai', turn.message, dim)
             answered += 1
           }
