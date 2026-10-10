@@ -23,6 +23,13 @@ import { build } from 'esbuild'
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..')
 
+/**
+ * 装机版现在住在工作区**外面**（`D:\AI周报\`），故意的：
+ * 工作区目录会被 DSH 打上可继承的 Low 标签，装机版搬出去就永远波及不到。
+ * 换过位置就设环境变量 `AI_WEEKLY_INSTALL_DIR`。
+ */
+const installDir = process.env.AI_WEEKLY_INSTALL_DIR ?? 'D:\\AI周报'
+
 /* ---------- 现打包纯函数那层，然后 import ---------- */
 
 const scratch = mkdtempSync(join(tmpdir(), 'ai-weekly-integrity-'))
@@ -46,7 +53,7 @@ try {
   const targets = [
     { label: '仓库根目录', path: repoRoot },
     { label: 'electron.exe（dev）', path: join(repoRoot, 'demo', 'node_modules', 'electron', 'dist', 'electron.exe') },
-    { label: 'AI周报.exe（装机）', path: join(repoRoot, 'mvp', 'ai-weekly', 'AI周报.exe') },
+    { label: 'AI周报.exe（装机）', path: join(installDir, 'AI周报.exe') },
   ]
 
   const probes = []
