@@ -143,6 +143,8 @@ interface Turn {
   who: 'ai' | 'me'
   text: string
   marker?: Marker
+  /** 行首那一行的原文（含 `[换块] 覆盖:1,3` 这样的覆盖声明）——报告里要看得见它 */
+  head?: string
   ms?: number
 }
 
@@ -153,6 +155,17 @@ function markerOf(raw: string): Marker {
   if (head.startsWith('[换题]')) return '换题'
   if (head.startsWith('[换块]')) return '换块'
   return '无标记'
+}
+
+/**
+ * 行首那一行的原文。
+ *
+ * 0.9.5 起 `[换块]` 那一行还带着覆盖声明（`[换块] 覆盖:1,3`），而它是「收尾对账」
+ * 唯一的输入 —— 光记一个 `换块` 标签看不出模型到底报没报，所以原样留下来。
+ */
+function headOf(raw: string): string {
+  const line = raw.trimStart().split('\n')[0]?.trim() ?? ''
+  return line.length > 28 ? `${line.slice(0, 28)}…` : line
 }
 
 function buildReport(input: {
@@ -190,6 +203,17 @@ function buildReport(input: {
       counted.filter((m) => m === '换题').length
     } 轮，[换块] ${counted.filter((m) => m === '换块').length} 轮`,
   )
+  /**
+   * 覆盖声明的遵循率 —— 「收尾对账」（客户端按模型报的覆盖算还差哪几个要点）唯一的输入。
+   * 模型要是不报，那条链路等于不生效，所以单独量一条。
+   */
+  const blocks = turns.filter((t) => t.who === 'ai' && t.marker === '换块')
+  const reported = blocks.filter((t) => /覆盖/.test(t.head ?? '')).length
+  lines.push(
+    `- **[换块] 报覆盖的轮数：${reported}/${blocks.length}**${
+      blocks.length > 0 && reported === 0 ? '（一条都没报 → 收尾对账不生效）' : ''
+    }`,
+  )
   lines.push(
     `- 单轮耗时：平均 ${aiTurns.length ? Math.round(totalMs / aiTurns.length / 100) / 10 : 0}s，最慢 ${
       slowest ? Math.round((slowest.ms ?? 0) / 100) / 10 : 0
@@ -209,7 +233,7 @@ function buildReport(input: {
     if (t.who === 'me') {
       lines.push(`**我**：${t.text}`, '')
     } else {
-      const tag = t.marker ? `\`${t.marker}\` ` : ''
+      const tag = t.head ? `\`${t.head}\` ` : t.marker ? `\`${t.marker}\` ` : ''
       const cost = t.ms ? `（${Math.round(t.ms / 100) / 10}s）` : ''
       lines.push(`**AI**：${tag}${t.text} ${cost}`, '')
     }
@@ -315,6 +339,7 @@ describe('真模型试跑台', () => {
               who: 'ai',
               text: turn.message,
               marker: markerOf(call?.raw ?? ''),
+              head: headOf(call?.raw ?? ''),
               ms: call?.ms,
             })
             // 覆盖要一起交回去：不然试跑台这边的状态永远「一样都没聊到」，
