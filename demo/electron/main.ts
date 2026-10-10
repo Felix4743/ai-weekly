@@ -23,6 +23,32 @@ const SMOKE = process.env.AI_WEEKLY_SMOKE === '1'
 const USER_DATA = process.env.AI_WEEKLY_USER_DATA?.trim()
 if (USER_DATA) app.setPath('userData', USER_DATA)
 
+/**
+ * 省内存的三个开关（0.9.4 加）。
+ *
+ * 背景：这是个一问一答的文本应用，却按 Chromium 的默认配置起了 4 个进程、
+ * 空闲就占 296 MB 工作集 / 202 MB 私有。实测在同一台机器上量出来的账：
+ *
+ * | 配置 | 进程 | 工作集 | 私有 |
+ * |---|---|---|---|
+ * | 默认 | 4 | 296.1 MB | 202.0 MB |
+ * | `--disable-gpu` | 4 | 276.3 MB | 140.0 MB |
+ * | `--in-process-gpu` | 3 | 260.4 MB | 199.0 MB |
+ * | 两个都开 | 3 | 238.3 MB | 129.3 MB |
+ * | 再 + low-end-device-mode | 3 | **235.2 MB** | **127.0 MB** |
+ *
+ * 合计省下约 61 MB 工作集、75 MB 私有，而且少一个进程。代价是渲染走软件光栅：
+ * 这一页全是文字与少量过渡，实测看不出差别（真要看滚动丝滑与否，删掉
+ * `disableHardwareAcceleration` 那一行即可，其余两个开关照留）。
+ *
+ * 这几个调用**必须在 app.whenReady 之前**，之后再加就不生效了。
+ */
+app.disableHardwareAcceleration()
+// GPU 并进主进程：少一个进程，省下的是它自己那份固定开销
+app.commandLine.appendSwitch('in-process-gpu')
+// 低配模式：Chromium 会把各种缓存与后台线程调小
+app.commandLine.appendSwitch('enable-low-end-device-mode')
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1120,

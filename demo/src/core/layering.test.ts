@@ -154,4 +154,30 @@ describe('分层约束 · Electron 外壳只做接线', () => {
     const bad = SHELL.filter((s) => /from\s+['"][^'"]*\bcore\//.test(s.text))
     expect(bad.map((s) => s.name)).toEqual([])
   })
+
+  /**
+   * 0.9.4 的省内存开关。
+   *
+   * 这三行必须在 `app.whenReady()` **之前**执行 —— 之后再设就不生效了，
+   * 而且失效时界面一切正常，只有内存悄悄涨回去，没有别的症状。
+   * 所以拿用例钉住顺序，—— 顺序这种事没有别的症状，只能靠用例钉住。
+   */
+  it('省内存的三个开关都在，而且都在 app.whenReady 之前', () => {
+    const main = SHELL.find((s) => s.name === 'main.ts')
+    expect(main).toBeDefined()
+    const text = main?.text ?? ''
+
+    for (const call of [
+      'app.disableHardwareAcceleration()',
+      "app.commandLine.appendSwitch('in-process-gpu')",
+      "app.commandLine.appendSwitch('enable-low-end-device-mode')",
+    ]) {
+      const at = text.indexOf(call)
+      expect(at, `少了这一句：${call}`).toBeGreaterThan(-1)
+      // 找真正的调用（`void app.whenReady`）而不是注释里提到的那个词
+      expect(at, `这一句必须在 whenReady 之前：${call}`).toBeLessThan(
+        text.indexOf('void app.whenReady'),
+      )
+    }
+  })
 })
