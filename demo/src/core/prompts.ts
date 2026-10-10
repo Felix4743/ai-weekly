@@ -11,6 +11,7 @@ import { buildInterviewerSystem } from './persona'
 import { LOW_SCORE_MAX, lowScoreItems, scoresLine } from './probe'
 import {
   CONTENT_BLOCKS,
+  MAX_TURNS_PER_BLOCK,
   PROBE_KEY,
   RECONCILE_KEY,
   SCRIPT,
@@ -39,11 +40,16 @@ export function dimensionLabels(): string[] {
 }
 
 /**
- * 把对话记录整理成模型好读的样子。
- * 传 dim 就只取那一个区块的，避免模型串台去聊别的块。
+ * 把对话记录整理成模型好读的样子：按区块分组，标出谁在问、谁在答。
+ *
+ * 0.9.5 起**整场都给**（以前只给当前那一块，为的是避免模型串台）。
+ * 改了是因为「它不记得我上一栏说过什么」正是机械感的一部分：进「人际」时
+ * 它看不到「事情」里聊过的张总，只能靠提示词里那句「过渡要像聊天」硬编一句。
+ * 现在前几栏作为**背景**一起给，并在调用处明写「别再回头问那些栏」——
+ * 整场 27 轮也就两三千 token，deepseek 的上下文放得下。
  */
-export function formatTranscript(history: ChatMessage[], dim?: Dimension): string {
-  const list = dim ? history.filter((m) => m.dimension === dim) : history
+export function formatTranscript(history: ChatMessage[]): string {
+  const list = history
   if (list.length === 0) return '（暂时还没有对话）'
 
   const byDim = new Map<Dimension, ChatMessage[]>()
@@ -61,6 +67,20 @@ export function formatTranscript(history: ChatMessage[], dim?: Dimension): strin
     sections.push(`【${d.label}】\n${lines.join('\n')}`)
   }
   return sections.length > 0 ? sections.join('\n\n') : '（暂时还没有对话）'
+}
+
+/** 整场记录那一小段的中性抬头（开场与回合两处共用，措辞要保持一致） */
+function transcriptBlock(history: ChatMessage[], dim: Dimension): string {
+  const label = dimensionScript(dim)?.label ?? dim
+  if (history.length === 0) return ''
+  return [
+    '到目前为止的采访记录（按栏分组）：',
+    '',
+    formatTranscript(history),
+    '',
+    `注意：别的栏已经聊过的**只作背景** —— 现在只聊「${label}」这一栏，别再回头去问那些栏；` +
+      '但可以顺着对方前面说过的话往下接。',
+  ].join('\n')
 }
 
 /** 各区块进度 + 当前档位，让模型知道走到哪儿了 */
@@ -222,6 +242,10 @@ export function buildOpeningPrompt(
 
   if (thisWeek) head.push('', thisWeek)
 
+  // 开场也把前面几栏的记录带上（0.9.5 起）：不然那句「过渡要像聊天」只能靠它硬编
+  const earlier = transcriptBlock(history, dim)
+  if (earlier) head.push('', earlier)
+
   head.push('', `整体进度：${formatProgress(state)}`, depthGuidance(state), '', missingBlock(state, dim))
   head.push(
     isVeryFirst
@@ -319,8 +343,7 @@ export function buildTurnPrompt(
         content: [
           `当前区块：${script.label}（要点都聊到了，现在是自由聊、没有清单要过）`,
           '',
-          '这一块的对话记录：',
-          formatTranscript(history, dim),
+          transcriptBlock(history, dim),
           '',
           '刚刚对方的回答：',
           `「${lastAnswer}」`,
@@ -352,8 +375,7 @@ export function buildTurnPrompt(
   const user = [
     `当前区块：${script.label}（关心的是：${script.hint}）`,
     '',
-    '这一块的对话记录：',
-    formatTranscript(history, dim),
+    transcriptBlock(history, dim),
     '',
     '本区块的要点：',
     pointList(state, dim),
@@ -362,6 +384,7 @@ export function buildTurnPrompt(
     '',
     '本区块进度：',
     missingBlock(state, dim),
+    `- 这一块已经聊了 ${progress.asked} 轮，最多 ${MAX_TURNS_PER_BLOCK} 轮${atCap ? '（这一轮别再追同一个点，换个方向）' : ''}`,
     `- 同一个话题已经连着追了 ${progress.followUpCount} 次，上限 ${cap} 次${atCap ? '（已达上限，这一轮别再追同一个点）' : ''}`,
     `- 整体进度：${formatProgress(state)}`,
     '',
@@ -381,6 +404,7 @@ export function buildTurnPrompt(
     '要求：**先说一句接住他的话**（引他的原词、点一个具体细节、或者顺着他的话往下半句），再问下一句；' +
       '一次只问一件事，不要堆成一长串；采访阶段保持中立 —— 不评价、不说教、不替他下结论、也别急着给建议。',
     '**不要按序号一道一道问**：要点是目标不是问卷，哪句话能顺出来就先聊哪个，一句话能同时聊到两样更好。',
+    '**轮数是有限的**：快到上限时先把还没聊到的要点问掉，别把一个已经聊透的点反复挖。',
   ].join('\n')
 
   return [

@@ -92,14 +92,16 @@ describe('提示词 · 对话记录', () => {
     expect(t).toContain('【人际】')
   })
 
-  it('只取指定区块，避免模型串台去聊别的块', () => {
-    const t = formatTranscript(
-      [msg('user', '在改客户那个方案', 'event'), msg('user', '跟老王对接', 'people')],
-      'people',
-    )
+  it('整场都给：前面几栏也带上，并按栏分组（0.9.5 起不再只给当前那一栏）', () => {
+    const t = formatTranscript([
+      msg('user', '在改客户那个方案', 'event'),
+      msg('user', '跟老王对接', 'people'),
+    ])
     expect(t).toContain('跟老王对接')
-    expect(t).not.toContain('在改客户那个方案')
-    expect(t).not.toContain('【事情】')
+    // 前几栏也看得到 —— 「它不记得我上一栏说过什么」正是机械感的一部分
+    expect(t).toContain('在改客户那个方案')
+    expect(t).toContain('【事情】')
+    expect(t).toContain('【人际】')
   })
 
   it('没有对话时给占位，不留空', () => {
@@ -371,6 +373,42 @@ describe('提示词 · 一轮追问判断', () => {
     )
     const user = userOf(buildTurnPrompt(state, 'event', history, PERSONA))
     expect(user).toContain('生成这周的梳理')
+  })
+
+  // 0.9.5 后半程：跨栏记忆。以前只给当前那一栏，于是进新栏时的「承接」只能硬编
+  it('回合提示词里带上前面几栏的记录，并明说只作背景、别回头问', () => {
+    const state = stateWith({}, { depth: 'mid', active: 'people', hasLastWeek: false })
+    const withEarlier = [
+      msg('ai', '这周主要在忙什么？', 'event'),
+      msg('user', '在改客户那个方案，卡在等老王拍板', 'event'),
+      msg('ai', '这周跟谁打交道最多？', 'people'),
+      msg('user', '主要还是老王。', 'people'),
+    ]
+    const user = userOf(buildTurnPrompt(state, 'people', withEarlier, PERSONA))
+
+    // 前面那一栏的原话看得见（这就是它能不能真承接的前提）
+    expect(user).toContain('卡在等老王拍板')
+    expect(user).toContain('【事情】')
+    expect(user).toContain('按栏分组')
+    // 但明说了只作背景，别回头去问别的栏 —— 防串台
+    expect(user).toContain('只作背景')
+    expect(user).toContain('别再回头去问那些栏')
+  })
+
+  it('开场也带上前面几栏（不然「过渡像聊天」只能硬编）', () => {
+    const state = stateWith({}, { depth: 'mid', active: 'people', hasLastWeek: false })
+    const earlier = [msg('user', '主要在改客户那个方案', 'event')]
+    const user = userOf(
+      buildOpeningPrompt(state, 'people', earlier, PERSONA, {}),
+    )
+    expect(user).toContain('主要在改客户那个方案')
+    expect(user).toContain('只作背景')
+  })
+
+  it('整场第一句时没有记录，就不硬塞一段空的', () => {
+    const state = stateWith({}, { depth: 'mid', active: 'event', hasLastWeek: false })
+    const user = userOf(buildOpeningPrompt(state, 'event', [], PERSONA, {}))
+    expect(user).not.toContain('按栏分组')
   })
 })
 
