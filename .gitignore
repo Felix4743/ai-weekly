@@ -13,3 +13,27 @@ mvp/*
 *.local
 .DS_Store
 *.log
+
+# 装机版（NSIS 装出来的那一份）**不许落在工作区里**。
+# 理由不是"占地方"：工作区目录会被 DSH 的 workspace-write 沙箱打上可继承的 Low 完整性标签，
+# 里面的 .exe 一律以 Low 启动，Chromium 在沙箱初始化阶段直接 CHECK 失败（0x80000003、日志 0 字节），
+# 看起来完全像文件损坏。所以它住工作区外的 D:\AI周报\。
+# 2026-10-10 它曾经整份落在仓库根目录（76 个文件 / 373 MB），下面这组是那次留下的兜底。
+/AI周报.exe
+/Uninstall AI周报.exe
+/aiweekly.exe
+/chrome_*.pak
+/icudtl.dat
+/resources.pak
+/snapshot_blob.bin
+/v8_context_snapshot.bin
+/vk_swiftshader*
+/vulkan-*.dll
+/d3dcompiler_*.dll
+/dxcompiler.dll
+/dxil.dll
+/ffmpeg.dll
+/LICENSE.electron.txt
+/LICENSES.chromium.html
+/locales/
+/resources/

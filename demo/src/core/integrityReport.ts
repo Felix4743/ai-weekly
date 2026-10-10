@@ -153,3 +153,49 @@ export function summarizeIntegrity(
 
   return { status, broken, unknown, fixCommand, lines }
 }
+
+/* ---------------- 装机版不许落在工作区里 ---------------- */
+
+/**
+ * 「装机版落在工作区里」的标记物。
+ *
+ * 只列 Electron 运行时的伴生文件，**刻意不列 `resources/` 这种通用目录名** ——
+ * 这里要判的是「一眼认出这是装出来的那份应用」，不是「仓库里不许有叫这个名字的东西」，
+ * 一份会误报的检查最后只会被人加 `# 已知误报` 注释糊掉。
+ *
+ * 命中任意一个就已经是事故：那份应用会被工作区的 Low 标签波及（见上），
+ * 而且几百 MB 的运行时随时可能被 `git add` 进版本库。
+ */
+export const INSTALL_ARTIFACT_NAMES: readonly string[] = [
+  'AI周报.exe',
+  'Uninstall AI周报.exe',
+  'aiweekly.exe',
+  'chrome_100_percent.pak',
+  'chrome_200_percent.pak',
+  'icudtl.dat',
+  'resources.pak',
+  'snapshot_blob.bin',
+  'v8_context_snapshot.bin',
+  'vk_swiftshader.dll',
+  'vk_swiftshader_icd.json',
+  'LICENSE.electron.txt',
+  'LICENSES.chromium.html',
+]
+
+/** 大小写与末尾斜杠都不该影响判定（Windows 上 `locales` 与 `locales/` 会两种写法都出现） */
+function normalizeEntry(name: string): string {
+  return name.trim().replace(/[\\/]+$/, '').toLowerCase()
+}
+
+/**
+ * 从「仓库根目录下都有些什么」里挑出装机版的痕迹。
+ *
+ * 入参就是一堆纯名字（`readdirSync` 给什么传什么），所以这层不碰文件系统、可以直接单测；
+ * 真去读目录是 `demo/scripts/check-integrity.mjs` 的事 —— 和上面 `icacls` 的分工一模一样。
+ *
+ * 返回按 `INSTALL_ARTIFACT_NAMES` 的次序而不是输入次序，这样报出来的一行是稳定的、好对比。
+ */
+export function findStrayInstallArtifacts(entries: readonly string[]): string[] {
+  const present = new Set(entries.map(normalizeEntry))
+  return INSTALL_ARTIFACT_NAMES.filter((name) => present.has(normalizeEntry(name)))
+}

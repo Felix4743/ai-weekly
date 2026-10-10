@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  findStrayInstallArtifacts,
   integrityFixCommand,
   isIntegritySafe,
   parseIntegrityLevel,
@@ -193,5 +194,64 @@ describe('完整性标签 · 修复命令', () => {
   it('路径带空格也安全，且只改标签不动权限', () => {
     const cmd = integrityFixCommand('D:\\含 空格 的\\工作区')
     expect(cmd).toBe('icacls "D:\\含 空格 的\\工作区" /setintegritylevel "(OI)(CI)Medium" /T /C /Q')
+  })
+})
+
+/**
+ * 2026-10-10 真的发生过一次：装机版整份落在仓库根目录（76 个文件 / 373 MB），
+ * 既被工作区的 Low 标签波及（打不开），又随时可能被 `git add` 进版本库。
+ * 这一层就是那次的兜底 —— 名字列表进来，装机版痕迹出去。
+ */
+describe('装机版 · 不许落在工作区里', () => {
+  /** 干净的仓库根目录该有的样子 */
+  const CLEAN = ['.git', '.gitignore', 'AGENTS.md', 'demo', 'docs', 'mvp', 'scripts', '问题.txt']
+
+  it('干净的仓库根目录什么都挑不出来', () => {
+    expect(findStrayInstallArtifacts(CLEAN)).toEqual([])
+  })
+
+  it('真实的装机版会被认出来，且不会把仓库自己的东西带进去', () => {
+    const stray = [
+      ...CLEAN,
+      'AI周报.exe',
+      'Uninstall AI周报.exe',
+      'chrome_100_percent.pak',
+      'icudtl.dat',
+      'LICENSES.chromium.html',
+      'locales',
+      'resources',
+    ]
+    expect(findStrayInstallArtifacts(stray)).toEqual([
+      'AI周报.exe',
+      'Uninstall AI周报.exe',
+      'chrome_100_percent.pak',
+      'icudtl.dat',
+      'LICENSES.chromium.html',
+    ])
+  })
+
+  it('只命中一个也算 —— 认出来就够了，不必等它凑齐', () => {
+    expect(findStrayInstallArtifacts(['AI周报.exe'])).toEqual(['AI周报.exe'])
+  })
+
+  it('大小写与末尾斜杠都不影响判定', () => {
+    expect(findStrayInstallArtifacts(['ai周报.EXE'])).toEqual(['AI周报.exe'])
+    expect(findStrayInstallArtifacts([' icudtl.dat '])).toEqual(['icudtl.dat'])
+    expect(findStrayInstallArtifacts(['AI周报.exe/'])).toEqual(['AI周报.exe'])
+  })
+
+  it('通用目录名不单独报 —— 会误报的检查最后只会被人注释掉', () => {
+    expect(findStrayInstallArtifacts(['resources', 'locales', 'demo/resources', 'docs/resources'])).toEqual([])
+  })
+
+  it('返回顺序是固定的，不看输入顺序', () => {
+    const forward = findStrayInstallArtifacts(['AI周报.exe', 'icudtl.dat'])
+    const reverse = findStrayInstallArtifacts(['icudtl.dat', 'AI周报.exe'])
+    expect(forward).toEqual(['AI周报.exe', 'icudtl.dat'])
+    expect(reverse).toEqual(forward)
+  })
+
+  it('空输入不崩，也不会凭空空转出结论', () => {
+    expect(findStrayInstallArtifacts([])).toEqual([])
   })
 })
