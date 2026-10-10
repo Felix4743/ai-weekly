@@ -1,10 +1,10 @@
 {
   "name": "ai-weekly",
   "private": true,
-  "version": "0.9.3",
+  "version": "0.9.4",
   "type": "module",
   "main": "dist-electron/main.cjs",
-  "description": "AI 周报 —— 采访式个人周复盘工具（状态打分卡 · 成长 · 三档深度 · 一周两次接着补）",
+  "description": "AI 周报 —— 采访式个人周复盘工具（状态打分卡 · 按打分追问低分项 · 成长 · 三档深度 · 一周两次接着补）",
   "author": "AI 周报",
   "scripts": {
     "dev": "vite",
