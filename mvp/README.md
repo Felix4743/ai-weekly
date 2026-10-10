@@ -136,6 +136,20 @@ tag 是权威版本：能 checkout、能 diff、能回滚。**不再往本目录
 `npm run dist` 出来的安装包在 `demo\release\`（`ai-weekly-<版本>-setup.exe`，约 107 MB），
 免安装版在 `demo\release\win-unpacked\`。那些都是构建产物，永远不进版本库。
 
+**旧安装包已经清掉了**（每个 106.9 MB，五个版本堆在一起就是 534 MB）：现在只剩当前版
+`ai-weekly-0.9.3-setup.exe` 和 `ai-weekly-0.9.0-setup.exe`（上面那条回退路要用它）。
+0.8.1 / 0.9.1 / 0.9.2 的安装包，连同全部五个 `.blockmap`，都删了 —— 这个工具没有自动更新，
+blockmap 只是 electron-updater 用来做差分下载的，放在这里纯属白占。
+**任何一个版本都能从自己的 tag 重建**，不必留着一份二进制：
+
+```powershell
+git checkout mvp-v0.9.2      # tag 就是权威版本
+npm run dist                 # 重建它的安装包，落在 demo\release\
+```
+
+免安装版 `win-unpacked\`（607.6 MB）保留着：`npm run smoke:packaged` 要拿它跑启动冒烟，
+文档里也指着它；要腾空间可以删，`npm run pack` 随时能重建。
+
 **装机版不在这个目录了**：装出来的那一份现在在 `D:\AI周报\`（工作区外面），
 免得再被 DSH 的沙箱标签波及。
 路径同步改过卸载项与两条快捷方式；`mvp/*` 仍然整块忽略（只放行本 README）。
