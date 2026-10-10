@@ -44,11 +44,15 @@ function render(current: WeeklyResult = result) {
   )
 }
 
-/** 从整页 HTML 里切出某一栏那张卡（截到下一栏为止），单看它的先后与徽标 */
-function cardHtml(html: string, key: string, nextKey: string) {
+/**
+ * 从整页 HTML 里切出某一栏那张卡（截到下一栏为止），单看它的先后与徽标。
+ * `nextKey` 可以省略 —— 0.9.5 起「成长」是最后一栏，后面没有别的区了。
+ */
+function cardHtml(html: string, key: string, nextKey?: string) {
   const start = html.indexOf(`id="section-${key}"`)
-  const end = html.indexOf(`id="section-${nextKey}"`)
   expect(start).toBeGreaterThanOrEqual(0)
+  if (!nextKey) return html.slice(start)
+  const end = html.indexOf(`id="section-${nextKey}"`)
   expect(end).toBeGreaterThan(start)
   return html.slice(start, end)
 }
@@ -141,25 +145,31 @@ describe('结果页渲染（临时校验）', () => {
     expect(html).toContain('展开')
   })
 
-  it('目录里状态与成长排在未办与本周主线之间', () => {
+  it('目录里本周主线与下周计划排在最前（0.9.5 重排）', () => {
     const html = render()
     const nav = html.slice(html.indexOf('outline-bar'), html.indexOf('</nav>'))
-    expect(nav.indexOf('未办')).toBeGreaterThanOrEqual(0)
+    expect(nav.indexOf('本周主线')).toBeGreaterThanOrEqual(0)
+    expect(nav.indexOf('本周主线')).toBeLessThan(nav.indexOf('下周计划'))
+    expect(nav.indexOf('下周计划')).toBeLessThan(nav.indexOf('事情'))
+    // 六张清单卡之间的相对顺序没动
     expect(nav.indexOf('未办')).toBeLessThan(nav.indexOf('状态'))
     expect(nav.indexOf('状态')).toBeLessThan(nav.indexOf('成长'))
-    expect(nav.indexOf('成长')).toBeLessThan(nav.indexOf('本周主线'))
   })
 
-  it('状态与成长两张卡落在未办之后、本周主线之前', () => {
+  it('页面上的顺序跟着目录走：主线与计划在六张卡之前', () => {
     const html = render()
+    const highlights = html.indexOf('id="section-highlights"')
+    const plan = html.indexOf('id="section-plan"')
+    const events = html.indexOf('id="section-events"')
     const pending = html.indexOf('id="section-pending"')
     const state = html.indexOf('id="section-state"')
     const growth = html.indexOf('id="section-growth"')
-    const highlights = html.indexOf('id="section-highlights"')
-    expect(pending).toBeGreaterThanOrEqual(0)
+    expect(highlights).toBeGreaterThanOrEqual(0)
+    expect(highlights).toBeLessThan(plan)
+    expect(plan).toBeLessThan(events)
+    expect(events).toBeLessThan(pending)
     expect(pending).toBeLessThan(state)
     expect(state).toBeLessThan(growth)
-    expect(growth).toBeLessThan(highlights)
   })
 
   it('状态卡上的数字 = 打过分的项 + 一条备注', () => {
@@ -182,11 +192,11 @@ describe('结果页渲染（临时校验）', () => {
   it('成长卡按条数给徽标', () => {
     const html = render()
     expect(countSection(result, 'growth')).toBe(1)
-    expect(cardHtml(html, 'growth', 'highlights')).toContain('card-count">1')
+    expect(cardHtml(html, 'growth')).toContain('card-count">1')
 
     const bare: WeeklyResult = { ...result, growth: [] }
     const empty = render(bare)
-    expect(cardHtml(empty, 'growth', 'highlights')).not.toContain('card-count')
+    expect(cardHtml(empty, 'growth')).not.toContain('card-count')
     expect(empty).toContain('id="section-growth"')
   })
 
@@ -475,5 +485,78 @@ describe('一排星的点击规则', () => {
       if (el.type === 'button') disabled.push(el)
     })
     expect(disabled.map((el) => el.props.disabled)).toEqual([true, true, true, true, true])
+  })
+})
+
+/**
+ * 0.9.5 的页头概览。
+ *
+ * 原来的问题是：最该被看见的「本周主线 + 下周计划」排在第 7、8 位，前面压着六张卡。
+ * 概览把「这周什么状态、主线是哪一句」提到最上面，不用先滚过一屏。
+ */
+describe('结果页页头概览', () => {
+  /** 只截概览那一块（页面别处也有「心情」这类字样） */
+  const brief = (current: WeeklyResult = result) => {
+    const html = render(current)
+    return html.slice(html.indexOf('class="result-brief"'), html.indexOf('outline-bar'))
+  }
+
+  it('摆在目录栏之前，先给状态与主线', () => {
+    const html = render()
+    expect(html.indexOf('class="result-brief"')).toBeGreaterThan(-1)
+    expect(html.indexOf('class="result-brief"')).toBeLessThan(html.indexOf('outline-bar'))
+
+    const block = brief()
+    expect(block).toContain('心情')
+    expect(block).toContain('4 / 5')
+    expect(block).toContain('睡眠')
+    expect(block).toContain('2 / 5')
+    expect(block).toContain('这周基本被方案拖着')
+  })
+
+  it('只列打过分的项 —— 没打分的两项不占位置', () => {
+    const block = brief()
+    expect(block).not.toContain('运动')
+    expect(block).not.toContain('饮食')
+    expect(block).not.toContain('未打分')
+  })
+
+  it('概览里的星是只读的：不是按钮，点不动', () => {
+    const block = brief()
+    expect(block).toContain('class="star on"')
+    expect(block).not.toContain('<button')
+  })
+
+  it('一项都没打分就说「这周没打分」，不摆四排空格', () => {
+    const block = brief({ ...result, state: createEmptyState() })
+    expect(block).toContain('这周没打分')
+    expect(block).not.toContain('未打分')
+    // 主线照样在
+    expect(block).toContain('这周基本被方案拖着')
+  })
+
+  it('没有主线时照实说，但概览还在', () => {
+    const block = brief({ ...result, highlights: [] })
+    expect(block).toContain('（还没有主线）')
+    expect(block).toContain('心情')
+  })
+
+  it('主线取第一条非空的那句（与总览页、归档同一个口径）', () => {
+    const block = brief({ ...result, highlights: ['   ', '第二句才是主线'] })
+    expect(block).toContain('第二句才是主线')
+    expect(block).not.toContain('这周基本被方案拖着')
+  })
+
+  it('总览页看旧周时没有这条概览（它只属于当前这份结果）', () => {
+    // 总览页用的是 ResultBody，页头是另一套（周与周统计），所以这里不该出现概览
+    const html = renderToStaticMarkup(
+      createElement(ResultBody, {
+        result,
+        onResultChange: () => {},
+        collapsed: ALL_COLLAPSED,
+        onToggle: () => {},
+      }),
+    )
+    expect(html).not.toContain('result-brief')
   })
 })

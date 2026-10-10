@@ -47,11 +47,15 @@ function render(archive: WeekEntry[]) {
   )
 }
 
-/** 从整页 HTML 里切出某一栏那张卡（截到下一栏为止），单看它的先后与徽标 */
-function cardHtml(html: string, key: string, nextKey: string) {
+/**
+ * 从整页 HTML 里切出某一栏那张卡（截到下一栏为止），单看它的先后与徽标。
+ * `nextKey` 可以省略 —— 0.9.5 起「成长」是最后一栏，后面没有别的区了。
+ */
+function cardHtml(html: string, key: string, nextKey?: string) {
   const start = html.indexOf(`id="section-${key}"`)
-  const end = html.indexOf(`id="section-${nextKey}"`)
   expect(start).toBeGreaterThanOrEqual(0)
+  if (!nextKey) return html.slice(start)
+  const end = html.indexOf(`id="section-${nextKey}"`)
   expect(end).toBeGreaterThan(start)
   return html.slice(start, end)
 }
@@ -144,16 +148,19 @@ describe('总览页渲染', () => {
 })
 
 describe('总览页 · 状态与成长卡（0.9.1 状态 / 0.9.3 成长）', () => {
-  it('看存档时状态卡在未办之后、成长之前、本周主线之前', () => {
+  it('看存档时也是同一套顺序：主线与计划在前，状态在未办之后、成长之前', () => {
     const html = render([entry(THIS_WEEK, { pending: ['报销还没交'] })])
+    const plan = html.indexOf('id="section-plan"')
     const pending = html.indexOf('id="section-pending"')
     const state = html.indexOf('id="section-state"')
     const growth = html.indexOf('id="section-growth"')
     const highlights = html.indexOf('id="section-highlights"')
-    expect(pending).toBeGreaterThanOrEqual(0)
+    expect(highlights).toBeGreaterThanOrEqual(0)
+    // 总览页与结果页共用 ResultBody，所以顺序必须一起变（0.9.5 重排）
+    expect(highlights).toBeLessThan(plan)
+    expect(plan).toBeLessThan(pending)
     expect(pending).toBeLessThan(state)
     expect(state).toBeLessThan(growth)
-    expect(growth).toBeLessThan(highlights)
   })
 
   it('打了两项分、写了一条备注，卡上数字是 3', () => {
@@ -177,6 +184,6 @@ describe('总览页 · 状态与成长卡（0.9.1 状态 / 0.9.3 成长）', () 
     const html = render([
       entry(THIS_WEEK, { highlights: ['有记录'], growth: ['读完《长日将尽》'] }),
     ])
-    expect(cardHtml(html, 'growth', 'highlights')).toContain('card-count">1')
+    expect(cardHtml(html, 'growth')).toContain('card-count">1')
   })
 })

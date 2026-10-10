@@ -61,6 +61,57 @@ export function ResultBody({
 
   return (
     <>
+      {/* 最该被看见的两块放最前面（0.9.5 重排）：「这周到底是怎么回事」和「下周做什么」，
+          才是这份结果值得看第二遍的东西；六张清单卡是佐证，退到后面去 */}
+      <section className="card highlight-card" id="section-highlights">
+        <h2 className="card-title">本周主线</h2>
+        <p className="card-desc">
+          第一条是这一周的判断，后面几条只写清单里没有的东西 · 都可以直接改
+        </p>
+        <EditableList
+          items={result.highlights}
+          onChange={setList('highlights')}
+          placeholder="这周到底是怎么回事…"
+          addLabel="添加一条"
+          emptyText="（还没有主线）"
+          leadFirst
+        />
+      </section>
+
+      <section className="card plan-card" id="section-plan">
+        <h2 className="card-title">
+          下周计划
+          <span className="badge-ai">AI 建议</span>
+        </h2>
+        <p className="card-desc">
+          下面是 AI 根据这周的情况给出的建议，你可以直接改。想到什么它没考虑到的，写在下面，让它重新整理一遍。
+        </p>
+
+        <div className="plan-grid">
+          <div>
+            <h3 className="col-title">三件重点</h3>
+            <EditableList
+              items={result.nextFocus}
+              onChange={setList('nextFocus')}
+              placeholder="下周的重点…"
+              addLabel="添加一条"
+            />
+          </div>
+          <div>
+            <h3 className="col-title">要跟进的人</h3>
+            <EditableList
+              items={result.nextFollowUps}
+              onChange={setList('nextFollowUps')}
+              placeholder="要联系谁…"
+              addLabel="添加一个人"
+              emptyText="（这次没有提到具体的人）"
+            />
+          </div>
+        </div>
+
+        {planFooter}
+      </section>
+
       <CollapsibleCard
         sectionKey="events"
         title="事情"
@@ -180,55 +231,6 @@ export function ResultBody({
           emptyText="（这周没聊到成长）"
         />
       </CollapsibleCard>
-
-      <section className="card highlight-card" id="section-highlights">
-        <h2 className="card-title">本周主线</h2>
-        <p className="card-desc">
-          第一条是这一周的判断，后面几条只写清单里没有的东西 · 都可以直接改
-        </p>
-        <EditableList
-          items={result.highlights}
-          onChange={setList('highlights')}
-          placeholder="这周到底是怎么回事…"
-          addLabel="添加一条"
-          emptyText="（还没有主线）"
-          leadFirst
-        />
-      </section>
-
-      <section className="card plan-card" id="section-plan">
-        <h2 className="card-title">
-          下周计划
-          <span className="badge-ai">AI 建议</span>
-        </h2>
-        <p className="card-desc">
-          下面是 AI 根据这周的情况给出的建议，你可以直接改。想到什么它没考虑到的，写在下面，让它重新整理一遍。
-        </p>
-
-        <div className="plan-grid">
-          <div>
-            <h3 className="col-title">三件重点</h3>
-            <EditableList
-              items={result.nextFocus}
-              onChange={setList('nextFocus')}
-              placeholder="下周的重点…"
-              addLabel="添加一条"
-            />
-          </div>
-          <div>
-            <h3 className="col-title">要跟进的人</h3>
-            <EditableList
-              items={result.nextFollowUps}
-              onChange={setList('nextFollowUps')}
-              placeholder="要联系谁…"
-              addLabel="添加一个人"
-              emptyText="（这次没有提到具体的人）"
-            />
-          </div>
-        </div>
-
-        {planFooter}
-      </section>
     </>
   )
 }

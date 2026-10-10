@@ -486,4 +486,16 @@ describe('演示用假 AI · 状态追问', () => {
     const result = await ai.summarize(history)
     expect('followUp' in result.state).toBe(false)
   })
+
+  it('只在状态追问里说过话时，小结也不会跟着一起丢掉', async () => {
+    // 四个内容块一条都没有 → 会走「这一周还没有被梳理过」那条占位分支；
+    // 小结是状态那一段的内容，不该被那个提前 return 顺手丢掉
+    const history = [
+      msg('ai', '睡眠不好是为什么？', 'probe'),
+      msg('user', '躺下之后脑子停不下来，一般一点多才睡。', 'probe'),
+    ]
+    const result = await ai.summarize(history)
+    expect(result.highlights).toEqual(['这一周还没有被梳理过'])
+    expect(result.state.followUp).toContain('躺下之后')
+  })
 })

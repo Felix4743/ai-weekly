@@ -402,6 +402,10 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
         ...byDim.reconcile,
       ]
       const result = createEmptyResult()
+      // 低分项聊出来的小结（0.9.4）：先算出来 —— 它是状态那一段的内容，
+      // 不该因为「四个内容块一条都没聊到」而跟着一起丢掉（下面有个提前 return）
+      const followUp = buildFollowUp(byDim.probe)
+      result.state = { ...result.state, ...followUp }
 
       if (all.filter((t) => !isNonAnswer(t)).length === 0) {
         result.events = ['（这次没有聊到具体的事情）']

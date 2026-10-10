@@ -1,7 +1,14 @@
 import { coerceScore } from './stateScore'
 import { STATE_KEYS, type WeeklyResult } from './types'
 
-/** 结果页的八个区块，顺序即页面上的先后顺序 */
+/**
+ * 结果页的八个区块，**顺序即页面上的先后顺序**。
+ *
+ * 0.9.5 起重排：本周主线与下周计划搬到最前面。理由是这一页有两个读者时刻 ——
+ * 「我就想看看这周到底怎么回事」（主角是主线与下周计划）与「我要动手改某一条」
+ * （才需要那六张清单卡）。原来六张卡压在主线前面，最该看第二遍的两句要滚过一屏才出现。
+ * 顺序一变，目录栏与滚动高亮都跟着变（它们都从这一个数组读），所以只改这一处。
+ */
 export type SectionKey =
   | 'events'
   | 'people'
@@ -13,14 +20,14 @@ export type SectionKey =
   | 'plan'
 
 export const SECTION_KEYS: SectionKey[] = [
+  'highlights',
+  'plan',
   'events',
   'people',
   'things',
   'pending',
   'state',
   'growth',
-  'highlights',
-  'plan',
 ]
 
 const SECTION_LABELS: Record<SectionKey, string> = {

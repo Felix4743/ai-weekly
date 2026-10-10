@@ -95,10 +95,19 @@ export function moveWeek(list: WeekEntry[], from: WeekKey, delta: number): WeekE
   return trim([...list.filter((e) => e.week !== from), { ...entry, week: target }])
 }
 
-/** 这一周的主线：第一条非空的主线。没有就是空串，界面照实说「没写主线」 */
+/**
+ * 一份结果的主线：第一条非空的主线。没有就是空串，界面照实说「没写主线」。
+ *
+ * 抽出来是因为有三处问的是同一件事：总览页的卡片、结果页页头那条概览、
+ * 归档列表 —— 各写一遍 `highlights.find(...)` 迟早会漂。
+ */
+export function mainLineOf(result: WeeklyResult): string {
+  return result.highlights.find((h) => h.trim().length > 0)?.trim() ?? ''
+}
+
+/** 这一周的主线；没有那一周就是空串 */
 export function mainLine(entry: WeekEntry | null): string {
-  if (!entry) return ''
-  return entry.result.highlights.find((h) => h.trim().length > 0)?.trim() ?? ''
+  return entry ? mainLineOf(entry.result) : ''
 }
 
 export interface WeekCounts {

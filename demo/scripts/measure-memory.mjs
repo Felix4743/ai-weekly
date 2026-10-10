@@ -23,6 +23,8 @@ const WALK_INDEX = process.argv.indexOf('--walk')
 const WALK = WALK_INDEX > -1 ? Number(process.argv[WALK_INDEX + 1] ?? 4) : 0
 const SKIP_INDEX = process.argv.indexOf('--skip')
 const SKIP = SKIP_INDEX > -1 ? Number(process.argv[SKIP_INDEX + 1] ?? 3) : 0
+/** `--result`：走完采访并生成结果，用来看结果页（0.9.5 重排过层级）真的长什么样 */
+const WANT_RESULT = process.argv.includes('--result')
 const PORT = 9333
 const TIMEOUT_MS = 180_000
 
@@ -150,6 +152,9 @@ const PROBE = `
       const last = bubbles[bubbles.length - 1]
       return last ? last.textContent.trim().slice(0, 28) : ''
     })(),
+    // 结果页上的区块顺序（0.9.5 把主线与计划提到了最前）
+    sections: [...document.querySelectorAll('[id^="section-"]')].map((el) => el.id),
+    brief: document.querySelector('.result-brief')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
   }
 `
 
@@ -275,6 +280,22 @@ async function main() {
     }
   }
 
+  if (WANT_RESULT) {
+    // 交卡（给一项低分，好让状态追问也走一遍）→ 定档 → 说一句 → 生成
+    await click(client, '.state-card .star', 6) // 睡眠 2 星
+    await sleep(200)
+    await click(client, '.state-card .btn.primary')
+    await sleep(400)
+    await click(client, '.btn.depth', 1)
+    await settle(client)
+    await say(client, '这周主要在改客户的方案，来回三版还没定，卡在等对方拍板。')
+    await settle(client)
+    await click(client, '.composer-actions .btn.generate')
+    await settle(client, 60_000)
+    await sleep(500)
+    await snap(client, '生成之后（结果页）')
+  }
+
   process.stdout.write('\n')
   process.stdout.write(
     `${'时点'.padEnd(22)} ${'JS 堆'.padStart(9)} ${'DOM'.padStart(6)} ${'气泡'.padStart(5)} ${'亮星'.padStart(5)}  ${'当前步骤'.padEnd(10)} 当前这道题\n`,
@@ -294,6 +315,13 @@ async function main() {
         `${(last.heapUsedMB - first.heapUsedMB).toFixed(2)} MB，` +
         `DOM 节点 ${last.domNodes - first.domNodes}\n`,
     )
+  }
+
+  // 结果页那一条：把区块顺序与页头概览直接印出来，省得靠猜
+  const withSections = rows.filter((row) => row.sections?.length > 0)
+  for (const row of withSections) {
+    process.stdout.write(`\n${row.时点} 的区块顺序：\n  ${row.sections.join(' → ')}\n`)
+    if (row.brief) process.stdout.write(`页头概览：${row.brief}\n`)
   }
   process.stdout.write('\n（进程的工作集与私有内存由调用方另外量，见 npm run measure:memory）\n')
 

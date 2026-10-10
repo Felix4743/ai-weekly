@@ -31,28 +31,31 @@ describe('结果页目录', () => {
   it('按固定顺序列出八块，文案和页面标题一致', () => {
     const outline = buildOutline(base())
     expect(outline.map((e) => e.key)).toEqual(SECTION_KEYS)
+    // 0.9.5 重排：主线与计划在最前，六张清单卡按原来的先后跟在后面
     expect(outline.map((e) => e.label)).toEqual([
+      '本周主线',
+      '下周计划',
       '事情',
       '人际',
       '物品',
       '未办',
       '状态',
       '成长',
-      '本周主线',
-      '下周计划',
     ])
   })
 
-  it('状态与成长排在未办之后、本周主线之前', () => {
+  it('主线与计划在最前，六张清单卡退到后面', () => {
     const keys = buildOutline(base()).map((e) => e.key)
+    expect(keys.slice(0, 2)).toEqual(['highlights', 'plan'])
+    expect(keys.indexOf('events')).toBeGreaterThan(keys.indexOf('plan'))
+    // 清单卡之间的相对顺序没动
     expect(keys.indexOf('state')).toBeGreaterThan(keys.indexOf('pending'))
     expect(keys.indexOf('growth')).toBeGreaterThan(keys.indexOf('state'))
-    expect(keys.indexOf('growth')).toBeLessThan(keys.indexOf('highlights'))
   })
 
   it('每一块都带上自己的条数', () => {
     const outline = buildOutline(base())
-    expect(outline.map((e) => e.count)).toEqual([2, 1, 1, 1, 3, 1, 1, 4])
+    expect(outline.map((e) => e.count)).toEqual([1, 4, 2, 1, 1, 1, 3, 1])
   })
 
   it('空结果时条数全是 0，但目录项一个都不少', () => {
@@ -101,15 +104,28 @@ describe('结果页目录', () => {
 
   it('锚点 id 稳定，能被页面直接引用', () => {
     expect(sectionDomId('things')).toBe('section-things')
+    // 0.9.5 起重排：本周主线与下周计划在最前（顺序即页面顺序，见 outline.ts 的注释）
     expect(SECTION_KEYS.map(sectionDomId)).toEqual([
+      'section-highlights',
+      'section-plan',
       'section-events',
       'section-people',
       'section-things',
       'section-pending',
       'section-state',
       'section-growth',
-      'section-highlights',
-      'section-plan',
+    ])
+  })
+
+  it('0.9.5：目录里主线与计划排在最前，六张清单卡退到后面', () => {
+    expect(SECTION_KEYS.slice(0, 2)).toEqual(['highlights', 'plan'])
+    expect(SECTION_KEYS.slice(2)).toEqual([
+      'events',
+      'people',
+      'things',
+      'pending',
+      'state',
+      'growth',
     ])
   })
 })
@@ -122,13 +138,14 @@ describe('滚动时判断当前是哪一块', () => {
     expect(activeSection([])).toBeNull()
   })
 
-  it('还没开始滚时高亮第一块', () => {
-    expect(activeSection(offsets, { threshold: 60 })).toBe('events')
+  it('还没开始滚时高亮最前面那一个（0.9.5 起是本周主线）', () => {
+    expect(activeSection(offsets, { threshold: 60 })).toBe('highlights')
   })
 
   it('某一块顶到目录栏下方时，就高亮它', () => {
-    // 物品（top 600）已经进到 620 以内，但未办（top 900）还没有
-    const scrolled = offsets.map((o) => ({ ...o, top: o.top - 620 }))
+    // offsets 顺序：主线 0、计划 300、事情 600、人际 900、物品 1200、未办 1500…
+    // 减掉 1250 之后「物品」进到 60 以内，而「未办」还在 250
+    const scrolled = offsets.map((o) => ({ ...o, top: o.top - 1250 }))
     expect(activeSection(scrolled, { threshold: 60 })).toBe('things')
   })
 
@@ -158,9 +175,11 @@ describe('滚动时判断当前是哪一块', () => {
 
   it('目录栏越高，越早把下一块算成当前', () => {
     const scrolled = offsets.map((o) => ({ ...o, top: o.top - 300 }))
-    expect(activeSection(scrolled, { threshold: 0 })).toBe('people')
-    expect(activeSection(scrolled, { threshold: 60 })).toBe('people')
-    expect(activeSection(scrolled, { threshold: 320 })).toBe('things')
+    // -300 之后：主线 -300、计划 0、事情 300、人际 600
+    expect(activeSection(scrolled, { threshold: 0 })).toBe('plan')
+    expect(activeSection(scrolled, { threshold: 60 })).toBe('plan')
+    expect(activeSection(scrolled, { threshold: 320 })).toBe('events')
+    expect(activeSection(scrolled, { threshold: 620 })).toBe('people')
   })
 })
 

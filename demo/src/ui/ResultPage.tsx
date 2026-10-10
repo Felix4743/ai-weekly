@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { mainLineOf } from '../core/archive'
 import { resultToMarkdown } from '../core/resultText'
 import {
   SECTION_KEYS,
@@ -8,6 +9,8 @@ import {
   targetScrollTop,
   type SectionKey,
 } from '../core/outline'
+import { SCORE_MAX, scoreText } from '../core/stateScore'
+import { STATE_FIELDS } from '../core/stateFields'
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
 import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
@@ -54,6 +57,9 @@ export function ResultPage({
 
   const outline = useMemo(() => buildOutline(result), [result])
   const markdown = resultToMarkdown(result)
+  /** 页头那条概览：只列**打过分的**项，一项都没打就写一句「这周没打分」 */
+  const scoredFields = STATE_FIELDS.filter((f) => result.state.scores?.[f.key] !== undefined)
+  const mainLine = mainLineOf(result)
 
   /** 吸顶目录栏遮住的高度，跳转和判定都以它为准 */
   const navOffset = () => (navRef.current?.offsetHeight ?? 0) + 12
@@ -182,6 +188,43 @@ export function ResultPage({
           </button>
         </div>
       </div>
+
+      {/* 页头概览（0.9.5）：一眼看到「这周状态怎么样、主线是哪一句」——
+          不用先滚过六张卡。都从这份结果里读，改了就跟着变 */}
+      <section className="result-brief" aria-label="这周概览">
+        <div className="brief-scores">
+          {scoredFields.length === 0 ? (
+            <span className="brief-empty">这周没打分</span>
+          ) : (
+            scoredFields.map((f) => (
+              <span key={f.key} className="brief-score">
+                <span className="brief-label">{f.label}</span>
+                <span className="stars" aria-hidden="true">
+                  {Array.from({ length: SCORE_MAX }, (_, i) => (
+                    <span
+                      key={i}
+                      className={`star${
+                        i < (result.state.scores?.[f.key] ?? 0) ? ' on' : ''
+                      }`}
+                    >
+                      ★
+                    </span>
+                  ))}
+                </span>
+                <span className="brief-value">{scoreText(result.state.scores?.[f.key])}</span>
+              </span>
+            ))
+          )}
+        </div>
+        <p className="brief-main">
+          <span className="brief-label">本周主线</span>
+          {mainLine ? (
+            <span className="brief-main-text">{mainLine}</span>
+          ) : (
+            <span className="brief-empty">（还没有主线）</span>
+          )}
+        </p>
+      </section>
 
       {/* 内容比较长，顶部放一条目录，点一下就跳到对应那一栏 */}
       <nav className="outline-bar" ref={navRef} aria-label="本周梳理目录">

@@ -874,6 +874,71 @@ body {
 
 /* ---------- 结果页目录：吸顶，点一下就跳到那一栏 ---------- */
 
+/* 页头那条概览（0.9.5）：四项星星 + 这一周的主线，摆在目录栏上方 */
+.result-brief {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 2px 0 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.brief-scores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.brief-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.brief-label {
+  color: var(--ink-3);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+/* 只读的星：跟打分那排共用 .star 的样式，但这里是 span，点不动 */
+.brief-score .star {
+  font-size: 13px;
+  cursor: default;
+}
+
+.brief-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.brief-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.brief-main-text {
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.brief-empty {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
 .outline-bar {
   position: sticky;
   top: 0;
