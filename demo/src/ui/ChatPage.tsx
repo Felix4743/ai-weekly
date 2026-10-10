@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { CONTENT_BLOCKS, DEPTHS, dimensionLabel, dimensionScript } from '../core/script'
 import {
-  answeredInBlock,
+  coveredInBlock,
   isAllComplete,
   isBlockComplete,
   nextStage,
-  questionsInBlock,
+  pointsInBlock,
 } from '../core/interview'
 import { STATE_FIELDS } from '../core/stateFields'
 import type { ChatMessage, Depth, Dimension, InterviewState, StateKey, StateScores } from '../core/types'
@@ -112,8 +112,8 @@ export function ChatPage({
               ? 'doing'
               : 'todo'
           const isActive = active === d.key
-          const done = answeredInBlock(interview, d.key)
-          const total = questionsInBlock(d.key)
+          const done = coveredInBlock(interview, d.key)
+          const total = pointsInBlock(interview, d.key)
 
           return (
             <button
@@ -201,7 +201,7 @@ export function ChatPage({
         <header className="stage-head">
           <span className="stage-title">{script?.label ?? '选一块开始'}</span>
           <span className="stage-hint">{script?.hint ?? ''}</span>
-          {activeComplete && <span className="stage-done">主问题聊完了 · 想继续就说</span>}
+          {activeComplete && <span className="stage-done">这一块聊完了 · 想继续就说</span>}
         </header>
 
         <div className="stage-body" ref={bodyRef}>

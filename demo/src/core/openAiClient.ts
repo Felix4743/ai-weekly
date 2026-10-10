@@ -1,7 +1,7 @@
 import type { AiClient, DeltaHandler, TurnResult } from './aiClient'
 import { AiError } from './aiError'
 import type { ChatMessagePayload, ChatTransport } from './chatTransport'
-import { blockProgress, currentQuestionSpec, nextStep } from './interview'
+import { blockProgress, currentPoint, nextStep } from './interview'
 import { degradedResult, parseResultSafe } from './parseResult'
 import { resolvePersonaPrompt } from './persona'
 import {
@@ -79,10 +79,10 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       const text = stripMarkerForDisplay(raw, true)
       if (text) return text
 
-      // 模型什么都没说也不能让界面空着：退回参考题目里的问法
+      // 模型什么都没说也不能让界面空着：退回那个还没聊到的要点的锚点问法
       return progress.complete
         ? EMPTY_BLOCK_TAIL
-        : spoken(currentQuestionSpec(state, dim)) || EMPTY_BLOCK_TAIL
+        : spoken(currentPoint(state, dim)) || EMPTY_BLOCK_TAIL
     },
 
     async reply(
@@ -100,7 +100,7 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
       const progress = blockProgress(state, dim)
 
       // 状态机才是追问次数的最终裁判：模型说要追问、但次数已经到顶时按换题处理，
-      // 否则「下一句话」和「新状态」会对不上。自由聊没有题目可换，不受这个上限约束。
+      // 否则「下一句话」和「新状态」会对不上。自由聊没有要点要聊，不受这个上限约束。
       const action: TurnAction =
         !progress.complete && parsed.action === 'followup' && progress.followUpCount >= followUpCap(state.depth)
           ? 'next'
@@ -108,15 +108,16 @@ export function createOpenAiClient({ transport, config }: OpenAiClientOptions): 
 
       let message = parsed.message
       if (!message) {
-        // 自由聊时参考题目已经问完，只能给一句中性的搭话
+        // 自由聊时要点都聊完了，只能给一句中性的搭话
         if (progress.complete) message = EMPTY_FREE_TAIL
         else {
-          const advanced = nextStep(state, dim, action)
-          message = spoken(currentQuestionSpec(advanced, dim)) || EMPTY_BLOCK_TAIL
+          // 退回「还没聊到的那个要点」的锚点问法（状态机不在这里推进，覆盖由 App 决定）
+          const advanced = nextStep(state, dim, action, { covered: parsed.covered })
+          message = spoken(currentPoint(advanced, dim)) || EMPTY_BLOCK_TAIL
         }
       }
 
-      return { action, message }
+      return { action, message, covered: parsed.covered }
     },
 
     async summarize(

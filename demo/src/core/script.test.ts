@@ -4,22 +4,26 @@ import {
   DEFAULT_FOLLOWUP_CAP,
   DEPTHS,
   FOLLOWUP_CAPS,
+  MAX_NUDGES,
+  MAX_TURNS_PER_BLOCK,
   PROBE_KEY,
   RECONCILE_KEY,
   SCRIPT,
-  TOTAL_MAIN_QUESTIONS,
+  TOTAL_POINTS,
   depthSpec,
   dimensionLabel,
   dimensionScript,
   followUpCap,
   isContentBlock,
-  questionsInBlock,
+  pointByNumber,
+  pointNumber,
+  pointsOf,
   spoken,
 } from './script'
 import type { Depth, Dimension } from './types'
 
-/** 0.9.3 的题量口径：事情 6 / 人际 4 / 物品与支出 4 / 成长 2；改脚本就会在这里被拦住 */
-const MAIN_COUNTS: Record<string, number> = { event: 6, people: 4, thing: 4, growth: 2 }
+/** 0.9.5 的要点口径：事情 4 / 人际 3 / 物品与支出 3 / 成长 2；改脚本就会在这里被拦住 */
+const POINT_COUNTS: Record<string, number> = { event: 4, people: 3, thing: 3, growth: 2 }
 
 describe('采访脚本 · 区块与顺序', () => {
   it('顺序是 状态追问 → 上周对账 → 事情 → 人际 → 物品与支出 → 成长（状态卡不在脚本里）', () => {
@@ -55,9 +59,9 @@ describe('采访脚本 · 区块与顺序', () => {
     }
   })
 
-  it('状态追问的题目不写死在这儿 —— 它按分数现算（见 probe.ts）', () => {
-    expect(dimensionScript('probe')?.mainQuestions).toEqual([])
-    expect(dimensionScript('probe')?.followUps).toEqual([])
+  it('状态追问的要点不写死在这儿 —— 它按分数现算（见 probe.ts）', () => {
+    expect(dimensionScript('probe')?.points).toEqual([])
+    expect(pointsOf('probe')).toEqual([])
   })
 
   it('CONTENT_BLOCKS 只收内容块，不含状态追问与上周对账', () => {
@@ -68,7 +72,7 @@ describe('采访脚本 · 区块与顺序', () => {
     expect(CONTENT_BLOCKS.some((d) => d.key === PROBE_KEY)).toBe(false)
   })
 
-  it('每个区块都有名字、说明和至少一道参考题目（状态追问例外，它的题目按分数现算）', () => {
+  it('每个区块都有名字、说明和至少一个要点（状态追问例外，它的要点按分数现算）', () => {
     const labels = SCRIPT.map((d) => d.label)
     expect(new Set(labels).size).toBe(labels.length)
 
@@ -76,67 +80,89 @@ describe('采访脚本 · 区块与顺序', () => {
       expect(d.label.trim().length).toBeGreaterThan(0)
       expect(d.hint.trim().length).toBeGreaterThan(0)
       if (d.key === PROBE_KEY) continue
-      expect(d.mainQuestions.length).toBeGreaterThan(0)
-      // 0.9.3 的题只有「意思 + 示例」：示例是演示模式要念的那一句，不能是空的
-      for (const spec of d.mainQuestions) {
-        expect(spec.intent.trim().length).toBeGreaterThan(0)
-        expect(spec.examples.length).toBeGreaterThan(0)
-        expect(spoken(spec).trim().length).toBeGreaterThan(0)
+      expect(d.points.length).toBeGreaterThan(0)
+      // 要点只有「要了解到什么 + 锚点示例」：锚点是演示模式要念的那一句，不能是空的
+      for (const p of d.points) {
+        expect(p.id.trim().length).toBeGreaterThan(0)
+        expect(p.intent.trim().length).toBeGreaterThan(0)
+        expect(p.anchors.length).toBeGreaterThan(0)
+        for (const anchor of p.anchors) expect(anchor.trim().length).toBeGreaterThan(0)
+        expect(spoken(p).trim().length).toBeGreaterThan(0)
       }
     }
   })
 
-  it('题量按脚本口径：内容块 4/6/4/2，对账只有 1 个', () => {
-    for (const [key, count] of Object.entries(MAIN_COUNTS)) {
-      expect(dimensionScript(key as Dimension)?.mainQuestions).toHaveLength(count)
+  it('要点量按脚本口径：内容块 4/3/3/2，对账只有 1 个', () => {
+    for (const [key, count] of Object.entries(POINT_COUNTS)) {
+      expect(pointsOf(key as Dimension)).toHaveLength(count)
     }
-    expect(dimensionScript('reconcile')?.mainQuestions).toHaveLength(1)
+    expect(pointsOf('reconcile')).toHaveLength(1)
     // 对账问的是「上周定的事落到了哪儿」（意思在 intent 里）
-    expect(dimensionScript('reconcile')?.mainQuestions[0].intent).toContain('落到了哪儿')
+    expect(pointsOf('reconcile')[0].intent).toContain('落到了哪儿')
   })
 
-  it('参考题目都是问句，而且整份脚本里不重复', () => {
+  it('要点 id 唯一，锚点都是问句、而且整份脚本里不重复', () => {
+    const ids = SCRIPT.flatMap((d) => d.points).map((p) => p.id)
+    expect(new Set(ids).size).toBe(ids.length)
+
     for (const d of SCRIPT) {
-      for (const spec of d.mainQuestions) expect(spoken(spec).endsWith('？')).toBe(true)
-    }
-    const all = SCRIPT.flatMap((d) => d.mainQuestions).map(spoken)
-    expect(new Set(all).size).toBe(all.length)
-  })
-
-  it('内容块都有追问池，人际块另留了一条「聊开了才问」的可选题', () => {
-    for (const d of CONTENT_BLOCKS) {
-      expect(d.followUps.length).toBeGreaterThan(0)
-      for (const spec of d.followUps) {
-        expect(spec.intent.trim().length).toBeGreaterThan(0)
-        expect(spoken(spec).trim().length).toBeGreaterThan(0)
+      for (const p of d.points) {
+        for (const anchor of p.anchors) expect(anchor.endsWith('？')).toBe(true)
       }
     }
-    // 对账那道单题也有自己的追问池
-    expect(dimensionScript('reconcile')?.followUps.length).toBeGreaterThan(0)
-    expect(dimensionScript('people')?.optionalQuestions).toHaveLength(1)
-    expect(dimensionScript('event')?.optionalQuestions).toBeUndefined()
+    const anchors = SCRIPT.flatMap((d) => d.points).flatMap((p) => p.anchors)
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
+  it('每一块都留了「往具体里追」的方向，而且只是一句话（不再是可轮取的追问池）', () => {
+    for (const d of SCRIPT) {
+      expect(typeof d.digInto).toBe('string')
+      expect(d.digInto?.trim().length ?? 0).toBeGreaterThan(10)
+      // 方向是给模型看的意思，不是一道道的题：里面不带序号
+      expect(d.digInto?.match(/\d+\s*[.、]/)).toBeNull()
+    }
   })
 })
 
-describe('采访脚本 · 题量统计', () => {
-  it('TOTAL_MAIN_QUESTIONS 只统计四个内容块', () => {
-    expect(TOTAL_MAIN_QUESTIONS).toBe(
-      CONTENT_BLOCKS.reduce((n, d) => n + d.mainQuestions.length, 0),
-    )
-    // 事情 6 + 人际 4 + 物品与支出 4 + 成长 2
-    expect(TOTAL_MAIN_QUESTIONS).toBe(6 + 4 + 4 + 2)
-    expect(TOTAL_MAIN_QUESTIONS).toBe(16)
+describe('采访脚本 · 要点统计', () => {
+  it('TOTAL_POINTS 只统计四个内容块', () => {
+    expect(TOTAL_POINTS).toBe(CONTENT_BLOCKS.reduce((n, d) => n + d.points.length, 0))
+    // 事情 4 + 人际 3 + 物品与支出 3 + 成长 2
+    expect(TOTAL_POINTS).toBe(4 + 3 + 3 + 2)
+    expect(TOTAL_POINTS).toBe(12)
 
-    const scriptTotal = SCRIPT.reduce((n, d) => n + d.mainQuestions.length, 0)
-    // 多出来的那一题就是上周对账，它不占进度
-    expect(scriptTotal).toBe(TOTAL_MAIN_QUESTIONS + 1)
+    const scriptTotal = SCRIPT.reduce((n, d) => n + d.points.length, 0)
+    // 多出来的那一个就是上周对账，它不占进度
+    expect(scriptTotal).toBe(TOTAL_POINTS + 1)
   })
 
-  it('questionsInBlock 按区块取题目，未知区块返回空数组', () => {
-    expect(questionsInBlock('growth')).toEqual(dimensionScript('growth')?.mainQuestions)
-    expect(questionsInBlock('thing')[0]).toBe(dimensionScript('thing')?.mainQuestions[0])
-    expect(questionsInBlock('reconcile')).toHaveLength(1)
-    expect(questionsInBlock('nope' as Dimension)).toEqual([])
+  it('pointsOf 按区块取要点，未知区块返回空数组', () => {
+    expect(pointsOf('growth')).toEqual(dimensionScript('growth')?.points)
+    expect(pointsOf('thing')[0]).toBe(dimensionScript('thing')?.points[0])
+    expect(pointsOf('reconcile')).toHaveLength(1)
+    expect(pointsOf('nope' as Dimension)).toEqual([])
+  })
+
+  it('pointNumber 是 1 起的序号，pointByNumber 越界给 undefined、不抛', () => {
+    expect(pointNumber(0)).toBe(1)
+    expect(pointNumber(3)).toBe(4)
+
+    const points = pointsOf('event')
+    expect(pointByNumber(points, 1)).toBe(points[0])
+    expect(pointByNumber(points, 4)).toBe(points[3])
+    expect(pointByNumber(points, 0)).toBeUndefined()
+    expect(pointByNumber(points, 5)).toBeUndefined()
+    expect(() => pointByNumber(points, 99)).not.toThrow()
+  })
+
+  it('spoken 取第一个锚点，没有要点时给空串', () => {
+    expect(spoken(pointsOf('event')[0])).toBe('这周大部分时间都花在哪儿了？')
+    expect(spoken(undefined)).toBe('')
+  })
+
+  it('防打转的兜底常量写在脚本里：一块最多 10 个回合，收尾最多补问 2 次', () => {
+    expect(MAX_TURNS_PER_BLOCK).toBe(10)
+    expect(MAX_NUDGES).toBe(2)
   })
 })
 
@@ -209,9 +235,13 @@ describe('采访脚本 · 查询函数', () => {
     expect(isContentBlock('nope' as Dimension)).toBe(false)
   })
 
-  it('RECONCILE_KEY 指向对账那一步', () => {
+  it('RECONCILE_KEY 指向对账那一步，PROBE_KEY 指向状态追问', () => {
     expect(RECONCILE_KEY).toBe('reconcile')
     expect(isContentBlock(RECONCILE_KEY)).toBe(false)
     expect(dimensionScript(RECONCILE_KEY)?.kind).toBe('step')
+
+    expect(PROBE_KEY).toBe('probe')
+    expect(isContentBlock(PROBE_KEY)).toBe(false)
+    expect(dimensionScript(PROBE_KEY)?.kind).toBe('step')
   })
 })

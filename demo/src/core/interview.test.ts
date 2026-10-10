@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
-  answeredInBlock,
   blockProgress,
   coveragePercent,
+  coveredIdsFromNumbers,
+  coveredInBlock,
   createInterview,
   currentFollowUpCap,
-  currentFollowUpSpec,
-  currentQuestionSpec,
+  currentPoint,
+  currentPointNumber,
   finishAll,
   isAllComplete,
   isBlockComplete,
@@ -15,39 +16,63 @@ import {
   nextIncompleteBlock,
   nextStage,
   nextStep,
+  nudgeBack,
   openBlock,
-  questionsInBlock,
+  planBlockEnd,
+  pointsFor,
+  pointsInBlock,
   setDepth,
   setStateDone,
+  uncoveredPoints,
 } from './interview'
 import {
   CONTENT_BLOCKS,
   DEFAULT_FOLLOWUP_CAP,
   FOLLOWUP_CAPS,
+  MAX_NUDGES,
+  MAX_TURNS_PER_BLOCK,
   PROBE_KEY,
   SCRIPT,
-  TOTAL_MAIN_QUESTIONS,
+  TOTAL_POINTS,
   dimensionScript,
   followUpCap,
   isContentBlock,
+  pointsOf,
   spoken,
 } from './script'
 import type { BlockProgress, Dimension, InterviewState, TurnAction } from './types'
 import { STATE_KEYS } from './types'
 
-const EMPTY: BlockProgress = { askIndex: 0, followUpCount: 0, complete: false, freeTurns: 0 }
+const EMPTY: BlockProgress = {
+  asked: 0,
+  followUpCount: 0,
+  complete: false,
+  freeTurns: 0,
+  covered: [],
+  nudges: 0,
+}
 
-/** 在某个区块里一路问到底；action 决定每一轮都追问还是每一轮都换题 */
+/** 在某个区块里一路问到底；action 决定每一轮都追问还是每一轮都换方向 */
 function runBlock(state: InterviewState, dim: Dimension, action: TurnAction) {
   const asked: string[] = []
   let s = state
   let guard = 0
   while (!isBlockComplete(s, dim) && guard < 300) {
-    asked.push(spoken(currentQuestionSpec(s, dim)))
+    asked.push(spoken(currentPoint(s, dim)))
     s = nextStep(s, dim, action)
     guard += 1
   }
   return { state: s, asked }
+}
+
+/** 模型收尾时把这一块的要点全报上（真模型写的是 `[换块] 覆盖:1,2,3,4`） */
+function allNumbers(state: InterviewState, dim: Dimension): number[] {
+  return pointsFor(state, dim).map((_, i) => i + 1)
+}
+
+/** 直接让模型「这一块聊完了」：报上全部要点序号收尾 */
+function closeBlock(state: InterviewState, dim: Dimension): InterviewState {
+  return nextStep(state, dim, 'block', { covered: allNumbers(state, dim) })
 }
 
 describe('分块采访状态机', () => {
@@ -92,122 +117,159 @@ describe('分块采访状态机', () => {
     expect(s.active).toBe('growth')
   })
 
-  it('不追问时按顺序走完一个区块，并停在这一块', () => {
+  it('不追问时，模型报上全部要点这一块就收尾 —— 块内没有固定顺序，客户端也不再数题', () => {
+    let s = openBlock(createInterview(), 'event')
+    const ids = pointsFor(s, 'event').map((p) => p.id)
+    expect(ids).toHaveLength(4)
+
+    s = closeBlock(s, 'event')
+    expect(isBlockComplete(s, 'event')).toBe(true)
+    expect(blockProgress(s, 'event').covered).toEqual(ids)
+    // 一个回合就收尾：没有「一道一道问」这件事了
+    expect(blockProgress(s, 'event').asked).toBe(1)
+    expect(s.active).toBe('event')
+  })
+
+  it('模型一直不收尾时，聊满 MAX_TURNS_PER_BLOCK 个回合就被兜底收尾', () => {
     const started = openBlock(createInterview(), 'event')
     const { state, asked } = runBlock(started, 'event', 'next')
 
-    expect(asked).toEqual((dimensionScript('event')?.mainQuestions ?? []).map(spoken))
+    expect(asked).toHaveLength(MAX_TURNS_PER_BLOCK)
+    expect(blockProgress(state, 'event').asked).toBe(MAX_TURNS_PER_BLOCK)
     expect(isBlockComplete(state, 'event')).toBe(true)
+    // 兜底收尾不改 active，也不伪造覆盖
     expect(state.active).toBe('event')
+    expect(blockProgress(state, 'event').covered).toEqual([])
   })
 
-  it('每次都要求追问时，追问次数被档位上限硬性拦住', () => {
-    const questions = dimensionScript('people')?.mainQuestions.length ?? 0
-
+  it('每次都要求追问时，追问次数被档位上限硬性拦住（到顶就降级成换方向）', () => {
     // 还没定档：用默认上限
-    const beforeDepth = runBlock(openBlock(createInterview(), 'people'), 'people', 'followup')
-    expect(beforeDepth.asked).toHaveLength(questions * (DEFAULT_FOLLOWUP_CAP + 1))
+    let s = openBlock(createInterview(), 'people')
+    for (let i = 0; i < DEFAULT_FOLLOWUP_CAP; i++) s = nextStep(s, 'people', 'followup')
+    expect(blockProgress(s, 'people').followUpCount).toBe(DEFAULT_FOLLOWUP_CAP)
+    expect(isFollowUpTurn(s, 'people')).toBe(true)
+
+    // 到顶之后再要追问，只能当作「换个方向」：计数归零
+    s = nextStep(s, 'people', 'followup')
+    expect(blockProgress(s, 'people').followUpCount).toBe(0)
+    expect(isFollowUpTurn(s, 'people')).toBe(false)
 
     // 定了快速档：上限收到 1 次
-    const fast = setDepth(createInterview(), 'fast')
-    const afterDepth = runBlock(openBlock(fast, 'people'), 'people', 'followup')
-    expect(afterDepth.asked).toHaveLength(questions * (FOLLOWUP_CAPS.fast + 1))
+    let fast = openBlock(setDepth(createInterview(), 'fast'), 'people')
+    fast = nextStep(fast, 'people', 'followup')
+    expect(blockProgress(fast, 'people').followUpCount).toBe(FOLLOWUP_CAPS.fast)
+    fast = nextStep(fast, 'people', 'followup')
+    expect(blockProgress(fast, 'people').followUpCount).toBe(0)
+
+    // 一直追问也不会把这一块卡住：回合上限到了照样收尾
+    expect(runBlock(openBlock(createInterview(), 'people'), 'people', 'followup').asked).toHaveLength(
+      MAX_TURNS_PER_BLOCK,
+    )
   })
 
   it('区块之间互不影响，可以只聊其中一块', () => {
     let s = openBlock(createInterview(), 'event')
     s = nextStep(s, 'event', 'next')
 
-    expect(blockProgress(s, 'event').askIndex).toBe(1)
-    expect(blockProgress(s, 'people').askIndex).toBe(0)
-    expect(blockProgress(s, 'thing').askIndex).toBe(0)
-    expect(blockProgress(s, 'growth').askIndex).toBe(0)
+    expect(blockProgress(s, 'event').asked).toBe(1)
+    expect(blockProgress(s, 'people').asked).toBe(0)
+    expect(blockProgress(s, 'thing').asked).toBe(0)
+    expect(blockProgress(s, 'growth').asked).toBe(0)
   })
 
-  it('区块的主问题聊完后，用户还想说就能接着说（自由聊）', () => {
-    const { state } = runBlock(openBlock(createInterview(), 'growth'), 'growth', 'next')
-    expect(isFreeChat(state, 'growth')).toBe(true)
+  it('要点都聊完后，用户还想说就能接着说（自由聊）', () => {
+    let s = openBlock(createInterview(), 'growth')
+    s = closeBlock(s, 'growth')
+    expect(isFreeChat(s, 'growth')).toBe(true)
 
-    const before = coveragePercent(state)
-    const next = nextStep(state, 'growth', 'followup')
+    const before = coveragePercent(s)
+    const beforeCovered = blockProgress(s, 'growth').covered
+    const next = nextStep(s, 'growth', 'followup')
 
-    // 题目不再推进，覆盖率也不动 —— 该聊的已经聊过了
-    expect(blockProgress(next, 'growth').askIndex).toBe(blockProgress(state, 'growth').askIndex)
+    // 要点不再推进，覆盖率也不动 —— 该聊的已经聊过了
+    expect(blockProgress(next, 'growth').asked).toBe(blockProgress(s, 'growth').asked)
+    expect(blockProgress(next, 'growth').covered).toEqual(beforeCovered)
     expect(blockProgress(next, 'growth').complete).toBe(true)
     expect(coveragePercent(next)).toBe(before)
 
     // 但这一句被记下来了，没人把他的话筒收走
     expect(blockProgress(next, 'growth').freeTurns).toBe(1)
     expect(blockProgress(next, 'growth').freeTurns).toBeGreaterThan(
-      blockProgress(state, 'growth').freeTurns,
+      blockProgress(s, 'growth').freeTurns,
     )
   })
 
-  it('每个内容块至少两道主问题，除状态追问外每个区块都有能念出来的追问', () => {
+  it('每个内容块至少两个要点，除状态追问外每一步都有能念出来的锚点', () => {
     for (const d of CONTENT_BLOCKS) {
-      expect(d.mainQuestions.length).toBeGreaterThanOrEqual(2)
+      expect(d.points.length).toBeGreaterThanOrEqual(2)
     }
     for (const d of SCRIPT) {
-      // 状态追问的题目与追问池都按分数现算（probe.ts），这份静态表里当然是空的
+      // 状态追问的要点按分数现算（probe.ts），这份静态表里当然是空的
       if (d.key === PROBE_KEY) {
-        expect(d.mainQuestions).toEqual([])
-        expect(d.followUps).toEqual([])
+        expect(d.points).toEqual([])
         continue
       }
-      expect(d.followUps.length).toBeGreaterThan(0)
-      for (const spec of d.followUps) expect(spoken(spec).trim().length).toBeGreaterThan(0)
+      expect(d.points.length).toBeGreaterThan(0)
+      for (const p of d.points) expect(spoken(p).trim().length).toBeGreaterThan(0)
     }
   })
 
-  it('能区分「换题」和「追问」', () => {
+  it('能区分「换方向」和「追问」', () => {
     let s = openBlock(createInterview(), 'thing')
     expect(isFollowUpTurn(s, 'thing')).toBe(false)
 
     s = nextStep(s, 'thing', 'followup')
     expect(isFollowUpTurn(s, 'thing')).toBe(true)
-    // 追问池按次数轮着取：追过一次之后取第二道
-    expect(currentFollowUpSpec(s, 'thing')).toBe(dimensionScript('thing')?.followUps[1])
-    expect(spoken(currentFollowUpSpec(s, 'thing')).trim().length).toBeGreaterThan(0)
+    expect(blockProgress(s, 'thing').followUpCount).toBe(1)
+
+    // 换方向：追问计数归零，模型报上来的那个要点被记下
+    s = nextStep(s, 'thing', 'next', { covered: [2] })
+    expect(isFollowUpTurn(s, 'thing')).toBe(false)
+    expect(blockProgress(s, 'thing').followUpCount).toBe(0)
+    expect(blockProgress(s, 'thing').covered).toEqual(['thing-delayed'])
+    expect(spoken(currentPoint(s, 'thing')).trim().length).toBeGreaterThan(0)
+
+    // 收尾同样归零
+    s = nextStep(s, 'thing', 'block')
+    expect(blockProgress(s, 'thing').followUpCount).toBe(0)
+    expect(isBlockComplete(s, 'thing')).toBe(true)
   })
 
-  it('[换块] 让当前块立即收尾，不再往后数题', () => {
+  it('[换块] 让当前块立即收尾，覆盖率按报上来的要点算', () => {
     let s = openBlock(createInterview(), 'event')
     expect(coveragePercent(s)).toBe(0)
 
-    s = nextStep(s, 'event', 'block')
+    s = nextStep(s, 'event', 'block', { covered: [1, 3] })
     expect(isBlockComplete(s, 'event')).toBe(true)
     expect(blockProgress(s, 'event').followUpCount).toBe(0)
-    // 六个主问题一次性算完，占覆盖率里的那一份
-    expect(answeredInBlock(s, 'event')).toBe(questionsInBlock('event'))
-    expect(coveragePercent(s)).toBe(
-      Math.round((questionsInBlock('event') / TOTAL_MAIN_QUESTIONS) * 100),
-    )
+    // 模型只报了两个要点，覆盖率就只算这两个 —— 剩下的是收尾对账要去补的
+    expect(coveredInBlock(s, 'event')).toBe(2)
+    expect(blockProgress(s, 'event').covered).toEqual(['event-focus', 'event-unsure'])
+    expect(coveragePercent(s)).toBe(Math.round((2 / TOTAL_POINTS) * 100))
   })
 
   it('能算出覆盖率，并指出下一块该聊什么', () => {
     let s = createInterview()
     expect(nextIncompleteBlock(s)).toBe('event')
 
-    s = runBlock(openBlock(s, 'event'), 'event', 'next').state
-    expect(answeredInBlock(s, 'event')).toBe(questionsInBlock('event'))
+    s = closeBlock(openBlock(s, 'event'), 'event')
+    expect(coveredInBlock(s, 'event')).toBe(4)
     expect(nextIncompleteBlock(s)).toBe('people')
     expect(isAllComplete(s)).toBe(false)
 
-    for (const d of SCRIPT) s = runBlock(s, d.key, 'next').state
+    for (const d of SCRIPT) s = closeBlock(openBlock(s, d.key), d.key)
     expect(isAllComplete(s)).toBe(true)
     expect(coveragePercent(s)).toBe(100)
     expect(nextIncompleteBlock(s)).toBeNull()
   })
 
   it('覆盖率的分母只有四个内容块，上周对账不占进度', () => {
-    const reconcileOnly = runBlock(createInterview(), 'reconcile', 'next').state
+    const reconcileOnly = nextStep(createInterview(), 'reconcile', 'block', { covered: [1] })
     expect(isBlockComplete(reconcileOnly, 'reconcile')).toBe(true)
-    expect(answeredInBlock(reconcileOnly, 'reconcile')).toBe(1)
+    expect(coveredInBlock(reconcileOnly, 'reconcile')).toBe(1)
     expect(coveragePercent(reconcileOnly)).toBe(0)
 
-    expect(TOTAL_MAIN_QUESTIONS).toBe(
-      CONTENT_BLOCKS.reduce((n, d) => n + d.mainQuestions.length, 0),
-    )
+    expect(TOTAL_POINTS).toBe(CONTENT_BLOCKS.reduce((n, d) => n + d.points.length, 0))
     expect(dimensionScript('reconcile')?.kind).toBe('step')
   })
 
@@ -221,7 +283,7 @@ describe('分块采访状态机', () => {
     expect(nextStage(stateDone)).toEqual({ kind: 'depth' })
 
     // 卡交了但没挑档位：哪怕已经有一块聊完了，也停在 depth 等人挑
-    const growthDone = runBlock(stateDone, 'growth', 'next').state
+    const growthDone = closeBlock(stateDone, 'growth')
     expect(nextStage(growthDone)).toEqual({ kind: 'depth' })
     expect(nextStage(setDepth(growthDone, 'mid'))).toEqual({ kind: 'block', dim: 'reconcile' })
   })
@@ -236,7 +298,7 @@ describe('分块采访状态机', () => {
     })
 
     // 一块聊完就轮到下一块
-    const reconcileDone = runBlock(createInterview(), 'reconcile', 'next').state
+    const reconcileDone = closeBlock(createInterview(), 'reconcile')
     expect(nextStage(ready(reconcileDone))).toEqual({ kind: 'block', dim: 'event' })
 
     // 全部标成结束但一直没定档时，仍然会停在等档位这一步
@@ -265,46 +327,95 @@ describe('分块采访状态机', () => {
     expect(setDepth(s, 'deep').depth).toBe('deep')
   })
 
-  it('覆盖全部主问题，一个都不漏', () => {
+  it('走完全部要点，一个都不漏', () => {
     let s = createInterview()
-    const allAsked: string[] = []
+    const coveredAll: string[] = []
     for (const d of SCRIPT) {
-      // 状态追问的题目按分数现算，没交卡（没有低分项）时它一道题都没有，
-      // 这一步「一个主问题都不漏」的口径只对写死题库的那些步骤有意义
-      if (d.key === PROBE_KEY) {
-        s = runBlock(s, d.key, 'next').state
-        expect(isBlockComplete(s, PROBE_KEY)).toBe(true)
-        continue
-      }
-      const r = runBlock(s, d.key, 'next')
-      allAsked.push(...r.asked)
-      s = r.state
+      s = closeBlock(openBlock(s, d.key), d.key)
+      coveredAll.push(...blockProgress(s, d.key).covered)
     }
-    expect(allAsked).toEqual(
+    // 状态追问没有低分项（它是空的一步），所以这里正好把脚本里写死的要点全收齐
+    expect(coveredAll).toEqual(
       SCRIPT.filter((d) => d.key !== PROBE_KEY)
-        .flatMap((d) => d.mainQuestions)
-        .map(spoken),
+        .flatMap((d) => d.points)
+        .map((p) => p.id),
     )
-    // 四个内容块的题目正好是 TOTAL_MAIN_QUESTIONS，对账那一题不占进度
-    expect(CONTENT_BLOCKS.flatMap((d) => d.mainQuestions)).toHaveLength(TOTAL_MAIN_QUESTIONS)
-    expect(allAsked).toHaveLength(TOTAL_MAIN_QUESTIONS + 1)
+    // 四个内容块的要点正好是 TOTAL_POINTS，对账那一个不占进度
+    expect(CONTENT_BLOCKS.flatMap((d) => d.points)).toHaveLength(TOTAL_POINTS)
+    expect(SCRIPT.flatMap((d) => d.points)).toHaveLength(TOTAL_POINTS + 1)
   })
 
   it('覆盖率只增不减，并最终到达 100', () => {
     let s = createInterview()
     const seen = [coveragePercent(s)]
-    for (const d of SCRIPT) {
-      let guard = 0
-      while (!isBlockComplete(s, d.key) && guard < 50) {
-        s = nextStep(s, d.key, 'next')
+    for (const d of CONTENT_BLOCKS) {
+      // 一个要点一个要点地报，覆盖率应当一步一步往上走
+      for (const n of allNumbers(s, d.key)) {
+        s = nextStep(s, d.key, 'next', { covered: [n] })
         seen.push(coveragePercent(s))
-        guard += 1
       }
     }
     expect(seen[seen.length - 1]).toBe(100)
     for (let i = 1; i < seen.length; i++) {
       expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1])
     }
+  })
+
+  it('未聊到的要点按要点表顺序给出，序号 1 起', () => {
+    const s = createInterview()
+    expect(uncoveredPoints(s, 'people').map((p) => p.id)).toEqual([
+      'people-most',
+      'people-missed',
+      'people-awkward',
+    ])
+    expect(currentPointNumber(s, 'people')).toBe(1)
+    expect(pointsInBlock(s, 'people')).toBe(3)
+
+    const after = nextStep(s, 'people', 'next', { covered: [1] })
+    expect(currentPoint(after, 'people')?.id).toBe('people-missed')
+    expect(currentPointNumber(after, 'people')).toBe(2)
+    expect(coveredInBlock(after, 'people')).toBe(1)
+
+    // 都聊到了就是 undefined，而不是 0 或者越界
+    const done = closeBlock(s, 'people')
+    expect(currentPoint(done, 'people')).toBeUndefined()
+    expect(currentPointNumber(done, 'people')).toBeUndefined()
+    expect(uncoveredPoints(done, 'people')).toEqual([])
+  })
+
+  it('把模型报的序号翻成要点 id：越界的丢掉、重复的只算一次', () => {
+    const s = createInterview()
+    expect(coveredIdsFromNumbers(s, 'event', [1, 3])).toEqual(['event-focus', 'event-unsure'])
+    expect(coveredIdsFromNumbers(s, 'event', [1, 1, 3])).toEqual(['event-focus', 'event-unsure'])
+    expect(coveredIdsFromNumbers(s, 'event', [0, 9])).toEqual([])
+    expect(coveredIdsFromNumbers(s, 'event', [])).toEqual([])
+    expect(coveredIdsFromNumbers(s, 'nope' as Dimension, [1])).toEqual([])
+  })
+
+  it('收尾对账：没聊到的要点摆出来，补问就把这一块退回未完成', () => {
+    let s = nextStep(openBlock(createInterview(), 'event'), 'event', 'block', { covered: [1, 2] })
+
+    let plan = planBlockEnd(s, 'event')
+    expect(plan.missing.map((p) => p.id)).toEqual(['event-unsure', 'event-interrupt'])
+    expect(plan.nudge).toBe(true)
+    expect(plan.ask).toBe(plan.missing[0])
+
+    s = nudgeBack(s, 'event')
+    expect(isBlockComplete(s, 'event')).toBe(false)
+    expect(blockProgress(s, 'event').nudges).toBe(1)
+
+    // 补满 MAX_NUDGES 次还不齐就放行：宁可少聊一样，也不要变成审讯
+    s = nudgeBack(s, 'event')
+    expect(blockProgress(s, 'event').nudges).toBe(MAX_NUDGES)
+    plan = planBlockEnd(s, 'event')
+    expect(plan.missing.map((p) => p.id)).toEqual(['event-unsure', 'event-interrupt'])
+    expect(plan.nudge).toBe(false)
+    expect(plan.ask).toBeUndefined()
+  })
+
+  it('要点都聊到了就不用补问', () => {
+    const s = closeBlock(createInterview(), 'event')
+    expect(planBlockEnd(s, 'event')).toEqual({ missing: [], nudge: false })
   })
 
   it('直接生成梳理时，所有区块都标记为结束，档位留着', () => {
@@ -326,25 +437,28 @@ describe('分块采访状态机', () => {
     const ready = { ...wild, stateDone: true, depth: 'mid' } as InterviewState
     expect(nextStage(ready)).toEqual({ kind: 'block', dim: 'reconcile' })
 
-    expect(() => currentQuestionSpec(wild, 'event')).not.toThrow()
-    expect(currentQuestionSpec(wild, 'event')).toBe(dimensionScript('event')?.mainQuestions[0])
-    expect(() => currentFollowUpSpec(wild, 'event')).not.toThrow()
-    expect(currentFollowUpSpec(wild, 'event')).toBe(dimensionScript('event')?.followUps[0])
+    expect(() => currentPoint(wild, 'event')).not.toThrow()
+    expect(currentPoint(wild, 'event')).toBe(pointsOf('event')[0])
+    expect(currentPointNumber(wild, 'event')).toBe(1)
+    expect(pointsInBlock(wild, 'event')).toBe(4)
     expect(currentFollowUpCap(wild)).toBe(DEFAULT_FOLLOWUP_CAP)
+    // 残缺状态里没有 lowKeys：状态追问这一步就是空的，不会凭空造要点
+    expect(pointsFor(wild, PROBE_KEY)).toEqual([])
 
     const unknown = 'nope' as Dimension
-    expect(currentQuestionSpec(wild, unknown)).toBeUndefined()
-    expect(currentFollowUpSpec(wild, unknown)).toBeUndefined()
+    expect(currentPoint(wild, unknown)).toBeUndefined()
+    expect(currentPointNumber(wild, unknown)).toBeUndefined()
     expect(nextStep(wild, unknown, 'followup')).toBe(wild)
-    expect(questionsInBlock(unknown)).toBe(0)
-    expect(answeredInBlock(wild, unknown)).toBe(0)
+    expect(pointsInBlock(wild, unknown)).toBe(0)
+    expect(coveredInBlock(wild, unknown)).toBe(0)
+    expect(planBlockEnd(wild, unknown)).toEqual({ missing: [], nudge: false })
   })
 })
 
 /**
  * 0.9.3 起「状态」不再是采访的一块：它是开场一张打分卡（四项点星 + 一行备注），
- * 由界面点击产生，既不进 SCRIPT、也不占主问题、也不占 AI 轮次。
- * 这一组用例钉的就是这条边界 —— 旧口径下 mood 是第五个区块，还带四道主问题。
+ * 由界面点击产生，既不进 SCRIPT、也不占要点、也不占 AI 轮次。
+ * 这一组用例钉的就是这条边界 —— 旧口径下 mood 是第五个区块，还带四道题。
  */
 describe('状态打分卡 · 不再是采访的一块', () => {
   it('mood 不是采访区块，脚本与内容块里都没有它', () => {
@@ -374,16 +488,30 @@ describe('状态打分卡 · 不再是采访的一块', () => {
     expect(nextStage(s)).toEqual({ kind: 'depth' })
     expect(nextStage(setDepth(s, 'fast'))).toEqual({ kind: 'block', dim: 'reconcile' })
   })
+
+  it('重复交卡但分数变了，低分项跟着重算', () => {
+    const first = setStateDone(createInterview(), { sleep: 2, sport: 1 })
+    expect(first.lowKeys).toEqual(['sleep', 'sport'])
+    // 分一样：连引用都不换
+    expect(setStateDone(first, { sleep: 2, sport: 1 })).toBe(first)
+    // 分变了：低分项跟着变
+    const changed = setStateDone(first, { sleep: 5, sport: 1 })
+    expect(changed).not.toBe(first)
+    expect(changed.lowKeys).toEqual(['sport'])
+  })
 })
 
 /**
  * 0.9.4：打完分之后的「状态追问」。
  *
  * 这一步是用户提的第一个问题（「打完分之后就没后续了」）的解法：
- * 问哪几项、问几道题，全看交卡那一刻的分 —— 所以它必须排在定档之后、内容块之前，
+ * 聊哪几样全看交卡那一刻的分 —— 所以它必须排在定档之后、内容块之前，
  * 而且没有低分项时**整步跳过**，不能给用户一个空步骤。
+ *
+ * 0.9.5 起这一步的「题目」也变成了**要点**：一项一个，按打分卡顺序现算，
+ * 但先聊哪个、怎么聊仍然由模型定。
  */
-describe('状态追问 · 按打分决定问什么', () => {
+describe('状态追问 · 按打分决定聊什么', () => {
   /** 交卡 → 定档，走完流程的前两步 */
   const ready = (scores: Record<string, number>) =>
     setDepth(setStateDone(createInterview(), scores), 'mid')
@@ -411,58 +539,67 @@ describe('状态追问 · 按打分决定问什么', () => {
     expect(nextStage(s)).toEqual({ kind: 'block', dim: 'reconcile' })
   })
 
-  it('两项低就有两道题，一道一道问，问完这一步才算完', () => {
-    let s = ready({ sleep: 2, sport: 1 })
-    s = openBlock(s, 'probe')
-
-    const first = currentQuestionSpec(s, 'probe')
-    expect(first?.intent).toContain('睡眠')
-
-    // 换题 → 轮到第二项
-    s = nextStep(s, 'probe', 'next')
-    expect(blockProgress(s, 'probe').askIndex).toBe(1)
-    expect(currentQuestionSpec(s, 'probe')?.intent).toContain('运动')
-    expect(isBlockComplete(s, 'probe')).toBe(false)
-
-    // 再换一次 → 两项都问过，这一步收尾
-    s = nextStep(s, 'probe', 'next')
-    expect(isBlockComplete(s, 'probe')).toBe(true)
+  it('这一步的要点按低分项现算：一项一个，id 形如 probe-sleep', () => {
+    const s = ready({ sleep: 2, sport: 1 })
+    expect(pointsInBlock(s, 'probe')).toBe(2)
+    expect(pointsFor(s, 'probe').map((p) => p.id)).toEqual(['probe-sleep', 'probe-sport'])
+    expect(pointsFor(s, 'probe')[0].intent).toContain('睡眠')
   })
 
-  it('每一项各有各的追问额度：换了项就重新数', () => {
+  it('两项低就有两个要点，聊到一个才算一个，两个都聊到这一步才收尾', () => {
+    let s = openBlock(ready({ sleep: 2, sport: 1 }), 'probe')
+
+    expect(pointsFor(s, 'probe').map((p) => p.id)).toEqual(['probe-sleep', 'probe-sport'])
+    expect(currentPoint(s, 'probe')?.intent).toContain('睡眠')
+
+    // 聊到第一项 → 轮到第二项，这一步还没完
+    s = nextStep(s, 'probe', 'next', { covered: [1] })
+    expect(coveredInBlock(s, 'probe')).toBe(1)
+    expect(currentPoint(s, 'probe')?.intent).toContain('运动')
+    expect(isBlockComplete(s, 'probe')).toBe(false)
+
+    // 收尾时把第二项也报上 → 两项都聊到，这一步收尾
+    s = nextStep(s, 'probe', 'block', { covered: [2] })
+    expect(isBlockComplete(s, 'probe')).toBe(true)
+    expect(uncoveredPoints(s, 'probe')).toEqual([])
+    expect(coveragePercent(s)).toBe(0)
+  })
+
+  it('换了要点就重新数追问：换方向时追问计数归零', () => {
     let s = openBlock(ready({ sleep: 2, sport: 2 }), 'probe')
     s = nextStep(s, 'probe', 'followup')
     expect(blockProgress(s, 'probe').followUpCount).toBe(1)
 
-    s = nextStep(s, 'probe', 'next')
+    s = nextStep(s, 'probe', 'next', { covered: [1] })
     expect(blockProgress(s, 'probe').followUpCount).toBe(0)
-    expect(blockProgress(s, 'probe').askIndex).toBe(1)
+    expect(currentPoint(s, 'probe')?.intent).toContain('运动')
   })
 
-  it('追问次数到顶就该换项了 —— 上限还是跟着档位走', () => {
+  it('追问次数到顶就该换要点 —— 上限还是跟着档位走', () => {
     const fast = setDepth(setStateDone(createInterview(), { sleep: 1, sport: 1 }), 'fast')
     let s = openBlock(fast, 'probe')
     expect(currentFollowUpCap(s)).toBe(FOLLOWUP_CAPS.fast)
 
     s = nextStep(s, 'probe', 'followup')
     expect(blockProgress(s, 'probe').followUpCount).toBe(1)
-    // 到顶了：再要追问也只能换项
+    // 到顶了：再要追问也只能换要点
     s = nextStep(s, 'probe', 'followup')
-    expect(blockProgress(s, 'probe').askIndex).toBe(1)
+    expect(blockProgress(s, 'probe').followUpCount).toBe(0)
   })
 
-  it('[换块] 让这一步立刻收尾，不用把剩下的项走完', () => {
+  it('[换块] 让这一步立刻收尾，不用把剩下的要点走完', () => {
     let s = openBlock(ready({ sleep: 1, sport: 1, mood: 1 }), 'probe')
-    s = nextStep(s, 'probe', 'block')
+    s = nextStep(s, 'probe', 'block', { covered: [1] })
     expect(isBlockComplete(s, 'probe')).toBe(true)
     expect(nextStage(s)).toEqual({ kind: 'block', dim: 'reconcile' })
+    // 只报了一项，收尾对账会把剩下的摆出来
+    expect(uncoveredPoints(s, 'probe').map((p) => p.id)).toEqual(['probe-sleep', 'probe-sport'])
   })
 
   it('状态追问不占覆盖率 —— 它是流程里的一步，不是内容块', () => {
     let s = openBlock(ready({ sleep: 1, sport: 1 }), 'probe')
     expect(coveragePercent(s)).toBe(0)
-    s = nextStep(s, 'probe', 'next')
-    s = nextStep(s, 'probe', 'next')
+    s = nextStep(s, 'probe', 'block', { covered: [1, 2] })
     expect(isBlockComplete(s, 'probe')).toBe(true)
     expect(coveragePercent(s)).toBe(0)
   })

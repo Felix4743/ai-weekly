@@ -1,9 +1,11 @@
 import type { ChatMessagePayload } from './chatTransport'
 import {
   blockProgress,
-  currentQuestionSpec,
+  coveredInBlock,
   nextStage,
   nextStep,
+  pointsFor,
+  uncoveredPoints,
 } from './interview'
 import { buildInterviewerSystem } from './persona'
 import { LOW_SCORE_MAX, lowScoreItems, scoresLine } from './probe'
@@ -65,20 +67,19 @@ export function formatTranscript(history: ChatMessage[], dim?: Dimension): strin
 export function formatProgress(state: InterviewState): string {
   const parts = CONTENT_BLOCKS.map((d) => {
     const p = blockProgress(state, d.key)
+    const total = pointsFor(state, d.key).length
     if (p.complete) return `${d.label}（已聊完）`
-    const total = d.mainQuestions.length
-    return `${d.label}（问到第 ${Math.min(p.askIndex + 1, total)}/${total} 题）`
+    return `${d.label}（要点 ${coveredInBlock(state, d.key)}/${total}）`
   })
   const reconcile = blockProgress(state, 'reconcile')
-  parts.push(`上周对账（${reconcile.complete ? '已过' : '还没问'}）`)
+  parts.push(`上周对账（${reconcile.complete ? '已过' : '还没聊'}）`)
 
   // 状态追问在最前面，而且只在真有低分项时才提它 —— 没有低分项这一步压根不存在
   const probe = blockProgress(state, PROBE_KEY)
-  const lowCount = (state.lowKeys ?? []).length
+  const lowCount = pointsFor(state, PROBE_KEY).length
   if (lowCount > 0) {
-    const n = lowCount
     parts.unshift(
-      `状态追问（${probe.complete ? '已问完' : `问到第 ${Math.min(probe.askIndex + 1, n)}/${n} 项`}）`,
+      `状态追问（${probe.complete ? '已聊完' : `要点 ${coveredInBlock(state, PROBE_KEY)}/${lowCount}`}）`,
     )
   }
 
@@ -154,31 +155,37 @@ function probeBlock(ctx: InterviewContext): string {
 }
 
 /**
- * 区块的参考题目：**只给要问到什么 + 示例，不给成品句子**。
+ * 这一块要聊到的几样：**只给「要了解到什么」+ 锚点，不给成品句子，也不规定顺序**。
  *
- * 0.9.3 起措辞交给模型（用户嫌一周又一周同一句「跟个人机一样」），
- * 客户端只管顺序与覆盖面 —— 所以这里写的是目标，不是台词。
+ * 0.9.5 这块东西从「6 道题」变成了「4 个要点」—— 一句话可能同时答到两个要点，
+ * 用户聊到哪就跟到哪。所以这里写的是目标，不是清单；顺序也由模型自己定。
+ * 序号是给收尾报覆盖用的（`[换块] 覆盖:1,3`）。
  */
-function questionList(dim: Dimension): string {
-  const script = dimensionScript(dim)
-  if (!script) return ''
-  return script.mainQuestions
-    .map((q, i) => `${i + 1}. 要问到：${q.intent}（示例：「${q.examples.join('」「')}」）`)
+function pointList(state: InterviewState, dim: Dimension): string {
+  return pointsFor(state, dim)
+    .map(
+      (p, i) => `${i + 1}. 要了解到：${p.intent}（锚点示例：「${p.anchors.join('」「')}」，只是意思）`,
+    )
     .join('\n')
 }
 
-function poolBlock(dim: Dimension): string {
-  const script = dimensionScript(dim)
-  if (!script) return ''
-  const lines = [
-    `追问的方向（说到才追，不硬问，用你自己的话问）：${script.followUps.map((f) => f.intent).join(' / ')}`,
-  ]
-  if (script.optionalQuestions?.length) {
-    lines.push(
-      `聊开了才问（没聊到就不提）：${script.optionalQuestions.map((q) => q.intent).join(' / ')}`,
-    )
-  }
-  return lines.join('\n')
+/** 往具体里追的方向：一句话给方向，不再是可轮取的追问清单 */
+function digIntoBlock(dim: Dimension): string {
+  const text = dimensionScript(dim)?.digInto
+  return text ? `往具体里追的方向：${text}` : ''
+}
+
+/**
+ * 这一块还没聊到的要点，带序号。
+ *
+ * 每轮都摆给模型看 —— 于是它自己会往没聊到的地方走，不需要客户端逐条督着问。
+ */
+function missingBlock(state: InterviewState, dim: Dimension): string {
+  const points = pointsFor(state, dim)
+  const missing = uncoveredPoints(state, dim)
+  if (missing.length === 0) return '这一块的要点都已经聊到了，可以收尾了。'
+  const lines = missing.map((p) => `${points.findIndex((x) => x.id === p.id) + 1}. ${p.intent}`)
+  return `这一块还没聊到的要点：\n${lines.join('\n')}`
 }
 
 /** 该区块第一次被打开时，让模型给出开场和第一个问题 */
@@ -206,29 +213,31 @@ export function buildOpeningPrompt(
   } else {
     head.push(
       '',
-      `参考题目（给的是**要问到什么**，不是要你念的句子；用你自己的话说）：`,
-      questionList(dim),
+      '这一块要聊到这几样（给的是**要了解到什么**，不是要你念的句子；**先聊哪个、聊几轮都你自己定**）：',
+      pointList(state, dim),
       '',
-      poolBlock(dim),
+      digIntoBlock(dim),
     )
   }
 
   if (thisWeek) head.push('', thisWeek)
 
-  head.push('', `整体进度：${formatProgress(state)}`, depthGuidance(state), '')
+  head.push('', `整体进度：${formatProgress(state)}`, depthGuidance(state), '', missingBlock(state, dim))
   head.push(
     isVeryFirst
       ? thisWeek
         ? '这是接着上次补的第一句话：先用半句话打个招呼，再按上面说的把他这周已经记下的复述一句，然后问今天想补点什么。'
-        : '这是整场采访的第一个问题。请先用半句话打个招呼，然后问出第 1 个问题。'
-      : dim === 'reconcile'
-        ? '请把上面上周的内容用他当时的说法复述一遍（不要改写、不要编造），然后问：实际落到了哪儿。'
-        : '请用一句自然的话过渡过来，然后问出第 1 个问题。',
+        : '这是整场采访的第一句话。先用半句话打个招呼，然后自然地开始 —— 别像在念第一题。'
+      : dim === RECONCILE_KEY
+        ? '请把上面上周的内容用他当时的说法复述一遍（不要改写、不要编造），然后问他实际落到了哪儿。'
+        : '过渡要像聊天：可以提一句他刚才说的（或他打的分）再接上，不要生硬地另起一个话题。',
   )
   head.push(
     '',
-    '要求：一次只说一句话（问一到三个小问题也行，别堆成一长串），不要列清单、不要小标题、不要复述区块名称；' +
-      '不要评价他做得怎么样，也不要替他说结论；**不要照抄示例问法**，那是意思不是台词。',
+    '要求：**先说一句接住他的话**（引他的原词、点一个具体细节），再往下问；' +
+      '一次只问一件事，不要列清单、不要小标题、不要复述区块名称；' +
+      '不要评价他做得怎么样、不要替他说结论、也不要给建议；' +
+      '**不要照抄锚点示例**，那是意思不是台词。',
   )
 
   return [
@@ -308,7 +317,7 @@ export function buildTurnPrompt(
       {
         role: 'user',
         content: [
-          `当前区块：${script.label}（参考题目都过完了，现在是自由聊）`,
+          `当前区块：${script.label}（要点都聊到了，现在是自由聊、没有清单要过）`,
           '',
           '这一块的对话记录：',
           formatTranscript(history, dim),
@@ -320,22 +329,16 @@ export function buildTurnPrompt(
           '- 如果他还想往下说：用 [追问]，顺着这句话问一个具体的问题，抓他话里的时间、结果、卡点或感受。',
           `- 如果他已经说完了：${doneTail}`,
           '',
-          '注意：不要念题目、不要催他换话题，也不要把他说过的总结一遍。',
+          '注意：不要催他换话题，也不要把他说过的总结一遍。',
         ].join('\n'),
       },
     ]
   }
 
-  const question = currentQuestionSpec(state, dim)
   const cap = followUpCap(state.depth)
   const atCap = progress.followUpCount >= cap
 
-  // 若不追问，状态机会推进成什么样 —— 这决定了「换题」该说什么
-  const advanced = nextStep(state, dim, 'next')
-  const advancedProgress = blockProgress(advanced, dim)
-  const blockWillFinish = advancedProgress.complete
-  const nextQuestion = blockWillFinish ? undefined : currentQuestionSpec(advanced, dim)
-
+  // 收尾之后轮到哪一块 —— 决定 [换块] 那句该往哪儿带
   const stageAfterBlock = nextStage(nextStep(state, dim, 'block'))
   const blockTail =
     stageAfterBlock.kind === 'done'
@@ -346,45 +349,38 @@ export function buildTurnPrompt(
           ? '用 [换块] 时提醒他先在卡片上把状态打完分（心情、睡眠、运动、饮食），别替他往下问。'
           : `用 [换块] 时，用一句自然的话过渡到「${dimensionScript(stageAfterBlock.dim)?.label ?? '下一块'}」，但不要替那一块把问题先问了。`
 
-  const advanceInstruction = blockWillFinish
-    ? blockTail
-    : `自然地过渡到下一个要问到的：${nextQuestion?.intent ?? ''}` +
-      (nextQuestion ? `（示例：「${nextQuestion.examples.join('」「')}」，只是意思，用你自己的话说）` : '') +
-      `。可以顺着刚才的话带过去，不要生硬地念题目。`
-
   const user = [
     `当前区块：${script.label}（关心的是：${script.hint}）`,
     '',
     '这一块的对话记录：',
     formatTranscript(history, dim),
     '',
-    '本区块进度：',
-    `- 这一轮要问到：${question?.intent ?? ''}`,
-    ...(question
-      ? [`- 示例问法（只是意思，用你自己的话说，别照抄）：「${question.examples.join('」「')}」`]
-      : []),
-    `- 本题已追问 ${progress.followUpCount} 次，上限 ${cap} 次${atCap ? '（已达上限，只能换题或换块）' : ''}`,
-    `- 整体进度：${formatProgress(state)}`,
+    '本区块的要点：',
+    pointList(state, dim),
     '',
-    poolBlock(dim),
+    digIntoBlock(dim),
+    '',
+    '本区块进度：',
+    missingBlock(state, dim),
+    `- 同一个话题已经连着追了 ${progress.followUpCount} 次，上限 ${cap} 次${atCap ? '（已达上限，这一轮别再追同一个点）' : ''}`,
+    `- 整体进度：${formatProgress(state)}`,
     '',
     '刚刚对方的回答：',
     `「${lastAnswer}」`,
     '',
     '请判断接下来怎么走：',
     atCap
-      ? '- 本题追问次数已到上限，只能用 [换题] 或 [换块]。'
+      ? '- 连着追的次数已到上限，只能用 [换题]（换个要点）或 [换块]（这一块收尾）。'
       : [
-          '- [追问]：这句话里有具体、值得挖的细节（判断依据、卡点、结果、感受），顺着它再问一到三个小问题，把这件事问透。',
-          `- [换题]：**先确认这一轮要问到的（${question?.intent ?? ''}）他真的答到了**，答到了才换；没答到就换个说法再问一次，不许跳过。`,
-          '- [换块]：这一块的关键都拿到了（他讲了做了什么、卡在哪、当时的判断或感受），可以进下一块了。',
+          '- [追问]：这句话里有具体、值得挖的细节（判断依据、卡点、结果、感受），顺着它再问一点，把这件事问透。',
+          '- [换题]：这个点聊得差不多了，换个方向 —— **换到哪个方向由你定**（上面没聊到的要点里挑一个自然的切入，或者顺着他的话拐过去）。',
+          '- [换块]：这一块的要点都聊到了，收尾换下一块。**报覆盖**：在 [换块] 同一行写上你聊到的要点序号，例如 `[换块] 覆盖:1,3`。',
         ].join('\n'),
-    `- 用 [换题] 时，${advanceInstruction}`,
-    ...(blockWillFinish ? [] : [`- ${blockTail}`]),
+    ...(blockTail ? [`- ${blockTail}`] : []),
     '',
-    '要求：一次只说一句话（问一到三个小问题也行），不要堆成一长串；' +
-      '采访阶段保持中立，不评价、不说教、不替他下结论；' +
-      '**措辞由你定，但前面「要问到」的那件事必须问到**，换个说法接着问也算。',
+    '要求：**先说一句接住他的话**（引他的原词、点一个具体细节、或者顺着他的话往下半句），再问下一句；' +
+      '一次只问一件事，不要堆成一长串；采访阶段保持中立 —— 不评价、不说教、不替他下结论、也别急着给建议。',
+    '**不要按序号一道一道问**：要点是目标不是问卷，哪句话能顺出来就先聊哪个，一句话能同时聊到两样更好。',
   ].join('\n')
 
   return [

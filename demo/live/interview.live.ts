@@ -5,7 +5,7 @@ import { describeError } from '../src/core/aiError'
 import type { ChatTransport } from '../src/core/chatTransport'
 import { createInterview, isBlockComplete, nextStep, openBlock, setDepth, setStateDone } from '../src/core/interview'
 import { createOpenAiClient } from '../src/core/openAiClient'
-import { followUpCap, SCRIPT, TOTAL_MAIN_QUESTIONS } from '../src/core/script'
+import { followUpCap, SCRIPT, TOTAL_POINTS } from '../src/core/script'
 import {
   nextId,
   type AppConfig,
@@ -129,12 +129,12 @@ const LIVE_DEPTH = 'mid' as const
 const LIVE_SCORES = { mood: 3, sleep: 2, sport: 1, diet: 4 } as const
 
 /**
- * 一个区块最多要回答多少轮：每道主问题都一路追到上限，再加上收尾那几轮。
- * 0.9.1 里最长的内容块（事情）有 6 道主问题，中度档每题最多 1 + 2 轮，
- * 所以按 SCRIPT 自己算出来，以后加题不用回来改这个数。
+ * 一个区块最多要回答多少轮：每个要点都一路追到上限，再加上收尾那几轮。
+ * 0.9.5 起块内没有题序了、只有要点（最多 4 个），所以按要点数算，
+ * 以后加要点不用回来改这个数。
  */
 const MAX_ANSWERS_PER_BLOCK =
-  Math.max(...SCRIPT.map((b) => b.mainQuestions.length)) * (1 + followUpCap(LIVE_DEPTH)) + 2
+  Math.max(...SCRIPT.map((b) => b.points.length)) * (1 + followUpCap(LIVE_DEPTH)) + 2
 
 type Marker = '追问' | '换题' | '换块' | '无标记'
 
@@ -178,7 +178,7 @@ function buildReport(input: {
   lines.push(`- 人设：${config.persona.prompt.trim() ? '用户自己写的' : '默认那套（温和朋友）'}`)
   lines.push('')
   lines.push('## 一、机械指标', '')
-  lines.push(`- 主问题总数：${TOTAL_MAIN_QUESTIONS}`)
+  lines.push(`- 要点总数：${TOTAL_POINTS}`)
   lines.push(`- 模型发言轮数：${aiTurns.length}`)
   lines.push(
     `- **行首标记遵循率：${followed}/${aiTurns.length}**（${

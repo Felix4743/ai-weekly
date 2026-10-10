@@ -1,10 +1,11 @@
 import type { AiClient, DeltaHandler } from './aiClient'
 import {
   blockProgress,
-  currentFollowUpSpec,
-  currentQuestionSpec,
+  currentPoint,
   nextStage,
   nextStep,
+  pointsFor,
+  uncoveredPoints,
 } from './interview'
 import { SCRIPT, dimensionLabel, followUpCap, spoken } from './script'
 import {
@@ -284,7 +285,9 @@ const DONE_RE = /说完了|没了|聊完了|先这样|够了|差不多了|就到
 
 /**
  * 假 AI 的行首动作判定，对应真实模型给 `[追问]/[换题]/[换块]`。
- * 演示里大部分时候靠 `next` 自然走完参考题目，只有自由聊才给 `block`。
+ *
+ * 0.9.5 起没有了「主问题清单」，所以这里也换了判据：说「说完了」直接收尾；
+ * 要点只剩一个没聊到、又没什么好追的，也收尾（演示模式会把整块要点都报成聊到了）。
  */
 export function decideAction(
   userText: string,
@@ -293,7 +296,29 @@ export function decideAction(
 ): TurnAction {
   const p = blockProgress(state, dim)
   if (p.complete) return DONE_RE.test(userText.trim()) ? 'block' : 'followup'
-  return shouldFollowUp(userText, state, dim) ? 'followup' : 'next'
+  if (DONE_RE.test(userText.trim())) return 'block'
+  if (shouldFollowUp(userText, state, dim)) return 'followup'
+  return uncoveredPoints(state, dim).length <= 1 ? 'block' : 'next'
+}
+
+/**
+ * 演示模式报上来的覆盖序号（对应真模型写在那行 `[换块] 覆盖:1,3` 里的东西）。
+ *
+ * 换方向时报「当前聊到的那个要点」，收尾时把这一块全报上 —— 这样假 AI 也会
+ * 走一遍「收尾对账」那条路，而不是把覆盖当成真模型才有的事。
+ */
+export function coveredNumbers(
+  state: InterviewState,
+  dim: Dimension,
+  action: TurnAction,
+): number[] {
+  const points = pointsFor(state, dim)
+  if (points.length === 0) return []
+  if (action === 'block') return points.map((_, i) => i + 1)
+  if (action !== 'next') return []
+  const covered = new Set(blockProgress(state, dim).covered ?? [])
+  const idx = points.findIndex((p) => !covered.has(p.id))
+  return idx >= 0 ? [idx + 1] : []
 }
 
 /**
@@ -350,10 +375,11 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
     }
 
     if (p.followUpCount > 0) {
-      return streamOut(spoken(currentFollowUpSpec(state, dim)), onDelta)
+      // 演示模式的追问就一句搭话 —— 真模型那边这一句是它自己组织的
+      return streamOut('嗯，这一点再多说点？', onDelta)
     }
 
-    const question = spoken(currentQuestionSpec(state, dim))
+    const question = spoken(currentPoint(state, dim))
     const isBlockFirst = blockHistory.filter((m) => m.role === 'ai').length === 0
     if (!isBlockFirst) return streamOut(question, onDelta)
 
@@ -380,15 +406,20 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       const answers = history.filter((m) => m.role === 'user' && m.dimension === dim)
       const last = answers.length > 0 ? answers[answers.length - 1].text : ''
       const action = decideAction(last, state, dim)
-      const advanced = nextStep(state, dim, action)
+      const covered = coveredNumbers(state, dim, action)
+      const advanced = nextStep(state, dim, action, { covered })
       // 这一块早就聊完、他又说「说完了」：那是想收尾，不是还想接着说。
       // 界面按同一个 action 去开下一块，这里就只给一句过渡，别再回「还有呢」。
       if (blockProgress(state, dim).complete && action === 'block') {
         await wait(760)
-        return { action, message: await streamOut(transitionMessage(advanced, dim), onDelta) }
+        return {
+          action,
+          message: await streamOut(transitionMessage(advanced, dim), onDelta),
+          covered,
+        }
       }
       const message = await nextMessage(advanced, dim, history, onDelta)
-      return { action, message }
+      return { action, message, covered }
     },
 
     async summarize(history: ChatMessage[], _ctx?: InterviewContext): Promise<WeeklyResult> {

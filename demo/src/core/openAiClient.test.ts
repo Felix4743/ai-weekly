@@ -3,7 +3,7 @@ import { AiError } from './aiError'
 import type { ChatRequest, ChatTransport } from './chatTransport'
 import { createInterview, openBlock } from './interview'
 import { createOpenAiClient } from './openAiClient'
-import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, SCRIPT, spoken } from './script'
+import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, pointsOf, spoken } from './script'
 import {
   createEmptyResult,
   type AppConfig,
@@ -59,7 +59,7 @@ function withFollowUps(count: number, depth: Depth | null = null): InterviewStat
     active: 'event',
     blocks: {
       ...base.blocks,
-      event: { askIndex: 0, followUpCount: count, complete: false, freeTurns: 0 },
+      event: { ...base.blocks.event, followUpCount: count },
     },
     // 状态卡与档位都已经过去了，这里只测区块内的一轮
     stateDone: true,
@@ -69,7 +69,7 @@ function withFollowUps(count: number, depth: Depth | null = null): InterviewStat
 }
 
 /**
- * 这一块的主问题已经问完，用户还想接着说。
+ * 这一块的要点已经聊完，用户还想接着说。
  * 追问次数刻意给到深度档上限，用来证明自由聊确实不受上限约束。
  */
 function inFreeChat(freeTurns = 1, followUpCount = FOLLOWUP_CAPS.deep): InterviewState {
@@ -135,12 +135,13 @@ describe('真实模型客户端 · 一轮回复', () => {
     expect(turn.message).toBe('那后来呢？')
   })
 
-  it('模型一句话都没说时退回脚本问题，界面不会留空气泡', async () => {
+  it('模型一句话都没说时退回脚本要点，界面不会留空气泡', async () => {
     const { transport } = scriptedTransport(['[追问]\n   '])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(openBlock(createInterview(), 'event'), 'event', HISTORY)
     expect(turn.action).toBe('followup')
-    expect(turn.message).toContain('这周主要在忙什么')
+    // 退回的是「还没聊到的第一个要点」的锚点，不是某道「题」
+    expect(turn.message).toBe(spoken(pointsOf('event')[0]))
   })
 
   it('一次请求就够了：带上模型名、完整对话与进度信息', async () => {
@@ -155,7 +156,7 @@ describe('真实模型客户端 · 一轮回复', () => {
 
     const payload = JSON.stringify(seen[0].messages)
     expect(payload).toContain('这周主要忙了些什么')
-    expect(payload).toContain('本题已追问 0 次')
+    expect(payload).toContain('同一个话题已经连着追了 0 次')
     expect(payload).toContain('在改客户那个方案')
   })
 
@@ -200,7 +201,7 @@ describe('真实模型客户端 · 专属采访者', () => {
     expect(JSON.stringify(seen[1].messages)).toContain('B 人设')
   })
 
-  it('主问题聊完之后还能追：自由聊不受追问上限约束', async () => {
+  it('要点聊完之后还能追：自由聊不受追问上限约束', async () => {
     const { transport } = scriptedTransport(['[追问]\n那这件事后来呢？'])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
@@ -208,16 +209,19 @@ describe('真实模型客户端 · 专属采访者', () => {
     expect(turn.message).toBe('那这件事后来呢？')
   })
 
-  it('自由聊时模型不说话，也不会把最后一道旧题再念一遍', async () => {
+  it('自由聊时模型不说话，也不会把要点的锚点再念一遍', async () => {
     const { transport } = scriptedTransport(['[追问]\n   '])
     const ai = createOpenAiClient({ transport, config: CONFIG })
     const turn = await ai.reply(inFreeChat(), 'event', HISTORY)
-    const eventQuestions = SCRIPT.find((d) => d.key === 'event')?.mainQuestions ?? []
-    const lastQuestion = spoken(eventQuestions[eventQuestions.length - 1])
-    expect(lastQuestion.length).toBeGreaterThan(0)
     expect(turn.action).toBe('followup')
-    expect(turn.message).not.toContain(lastQuestion)
+    // 要点都聊完了，只能给一句中性的搭话
+    expect(turn.message).toBe('嗯，还有呢？')
     expect(turn.message.trim().length).toBeGreaterThan(0)
+    // 要点锚点就是「旧题」的等价物：自由聊里一句都不该被念出来
+    for (const point of pointsOf('event')) {
+      expect(spoken(point).length).toBeGreaterThan(0)
+      expect(turn.message).not.toContain(spoken(point))
+    }
   })
 })
 

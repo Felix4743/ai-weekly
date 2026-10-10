@@ -10,7 +10,7 @@ import {
   formatProgress,
   formatTranscript,
 } from './prompts'
-import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, dimensionScript } from './script'
+import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS } from './script'
 import {
   createEmptyResult,
   type BlockProgress,
@@ -108,11 +108,12 @@ describe('提示词 · 对话记录', () => {
 })
 
 describe('提示词 · 区块开场与收尾', () => {
-  it('第一块带打招呼的指示，并把参考题目当「要问到什么」交给模型', () => {
+  it('第一块带打招呼的指示，并把要点当「要了解到什么」交给模型', () => {
     const text = textOf(
       buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
     )
-    expect(text).toContain('这周主要在忙什么')
+    expect(text).toContain('这周的时间主要花在哪儿、重心落在哪件事上')
+    expect(text).toContain('锚点示例：「这周大部分时间都花在哪儿了？」')
     expect(text).toContain('打个招呼')
   })
 
@@ -122,39 +123,43 @@ describe('提示词 · 区块开场与收尾', () => {
       buildOpeningPrompt(openBlock(createInterview(), 'thing'), 'thing', history, PERSONA),
     )
     expect(text).toContain('这周买了点什么')
-    expect(text).toContain('自然的话过渡')
+    expect(text).toContain('过渡要像聊天')
     expect(text).not.toContain('打个招呼')
   })
 
-  it('题目只给「要问到什么」+ 示例，并明确要求别照抄', () => {
+  it('要点只给「要了解到什么」+ 锚点，并明确要求别照抄', () => {
     const text = textOf(
       buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
     )
-    expect(text).toContain('参考题目（给的是**要问到什么**，不是要你念的句子；用你自己的话说）')
-    expect(text).toContain('1. 要问到：这周主要在忙什么（示例：「这周主要在忙什么？」）')
-    expect(text).toContain('不要照抄示例问法')
-    expect(text).toContain('追问的方向（说到才追，不硬问，用你自己的话问）')
+    expect(text).toContain(
+      '这一块要聊到这几样（给的是**要了解到什么**，不是要你念的句子；**先聊哪个、聊几轮都你自己定**）：',
+    )
+    expect(text).toContain(
+      '1. 要了解到：这周的时间主要花在哪儿、重心落在哪件事上（锚点示例：「这周大部分时间都花在哪儿了？」',
+    )
+    expect(text).toContain('**不要照抄锚点示例**')
+    expect(text).toContain('往具体里追的方向：')
   })
 
-  it('题目池只列 intent，不再给出追问的原句', () => {
+  it('要点表只列 intent 与锚点，不再给出追问的原句', () => {
     const text = textOf(
       buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA),
     )
     expect(text).toContain('这件事最花时间的是哪一块')
-    // 追问池给的是意思，不是要念的句子
+    // 追的方向给的是意思，不是要念的句子
     expect(text).not.toContain('（示例：「这件事最花时间的是哪一块？」）')
   })
 
-  it('开场也带上四个内容块的进度、对账状态和当前档位', () => {
+  it('开场也带上四个内容块的要点进度、对账状态和当前档位', () => {
     const text = textOf(
       buildOpeningPrompt(openBlock(createInterview(), 'people'), 'people', [], PERSONA),
     )
     expect(text).toContain('整体进度：')
-    expect(text).toContain('事情（问到第 1/6 题）')
-    expect(text).toContain('人际（问到第 1/4 题）')
-    expect(text).toContain('物品与支出（问到第 1/4 题）')
-    expect(text).toContain('成长（问到第 1/2 题）')
-    expect(text).toContain('上周对账（还没问）')
+    expect(text).toContain('事情（要点 0/4）')
+    expect(text).toContain('人际（要点 0/3）')
+    expect(text).toContain('物品与支出（要点 0/3）')
+    expect(text).toContain('成长（要点 0/2）')
+    expect(text).toContain('上周对账（还没聊）')
     expect(text).toContain('档位：还没定档')
   })
 
@@ -244,13 +249,13 @@ describe('提示词 · 一轮追问判断', () => {
     msg('user', '在改客户那个方案，改了三版还没定', 'event'),
   ]
 
-  it('把这一轮要问到什么、追问次数、当前档位的上限都告诉模型', () => {
+  it('把这一块的要点、追问次数、当前档位的上限都告诉模型', () => {
     const text = textOf(
       buildTurnPrompt(openBlock(createInterview(), 'event'), 'event', history, PERSONA),
     )
-    expect(text).toContain('- 这一轮要问到：这周主要在忙什么')
-    expect(text).toContain('- 示例问法（只是意思，用你自己的话说，别照抄）：「这周主要在忙什么？」')
-    expect(text).toContain('本题已追问 0 次')
+    expect(text).toContain('本区块的要点：')
+    expect(text).toContain('1. 要了解到：这周的时间主要花在哪儿、重心落在哪件事上（锚点示例：')
+    expect(text).toContain('同一个话题已经连着追了 0 次')
     expect(text).toContain(`上限 ${DEFAULT_FOLLOWUP_CAP} 次`)
   })
 
@@ -282,65 +287,66 @@ describe('提示词 · 一轮追问判断', () => {
     expect(text).toContain('在改客户那个方案，改了三版还没定')
   })
 
-  it('追问到顶时明确只能换题或换块', () => {
+  it('追问到顶时明确只能换方向或换块', () => {
     const state = stateWith(
-      { event: { askIndex: 0, followUpCount: DEFAULT_FOLLOWUP_CAP, complete: false } },
+      { event: { asked: 0, followUpCount: DEFAULT_FOLLOWUP_CAP, complete: false } },
       { active: 'event' },
     )
     const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
-    expect(text).toContain('已达上限，只能换题或换块')
-    expect(text).toContain('只能用 [换题] 或 [换块]')
+    expect(text).toContain('已达上限，这一轮别再追同一个点')
+    expect(text).toContain('只能用 [换题]（换个要点）或 [换块]（这一块收尾）')
   })
 
-  it('换题时告诉模型下一个要问到什么，并强调没答到就不许跳过', () => {
+  it('换方向：方向由模型自己定，但没聊到的要点每轮都摆在它面前', () => {
     const text = textOf(
       buildTurnPrompt(openBlock(createInterview(), 'event'), 'event', history, PERSONA),
     )
-    expect(text).toContain('自然地过渡到下一个要问到的')
+    // 旧模型的「下一道题 + 没答到不许跳过」变成了「方向自定 + 每轮摆出缺口 + 收尾报覆盖」
+    expect(text).toContain('换个方向 —— **换到哪个方向由你定**')
+    expect(text).toContain('上面没聊到的要点里挑一个自然的切入')
     expect(text).toContain('有没有本来打算做、最后没动的事，卡在哪一步')
-    expect(text).toContain('先确认这一轮要问到的（这周主要在忙什么）他真的答到了')
-    expect(text).toContain('没答到就换个说法再问一次，不许跳过')
-    expect(text).toContain('措辞由你定，但前面「要问到」的那件事必须问到')
+    expect(text).toContain('**报覆盖**：在 [换块] 同一行写上你聊到的要点序号')
+    expect(text).toContain('**不要按序号一道一道问**：要点是目标不是问卷')
   })
 
-  it('这一块参考题目问完时改成收尾，并指向下一块', () => {
-    const lastIndex = (dimensionScript('event')?.mainQuestions.length ?? 1) - 1
-    const state = done(
-      stateWith(
-        { event: { askIndex: lastIndex, followUpCount: 0, complete: false } },
-        { hasLastWeek: false, depth: 'mid', active: 'event' },
-      ),
-      'reconcile',
-    )
+  it('这一块收尾时，[换块] 的话术指向下一块', () => {
+    const state = stateWith({}, { hasLastWeek: false, depth: 'mid', active: 'event' })
     const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
-    expect(text).toContain('人际')
+    expect(text).toContain('用一句自然的话过渡到「人际」')
     expect(text).toContain('不要替那一块把问题先问了')
   })
 
   it('下一块之前还卡着状态打分卡时，[换块] 的话术是提醒他去打分', () => {
-    const lastIndex = (dimensionScript('event')?.mainQuestions.length ?? 1) - 1
-    const state = stateWith(
-      { event: { askIndex: lastIndex, followUpCount: 0 } },
-      { hasLastWeek: false, stateDone: false, active: 'event' },
-    )
+    const state = stateWith({}, { hasLastWeek: false, stateDone: false, active: 'event' })
     const text = textOf(buildTurnPrompt(state, 'event', history, PERSONA))
     expect(text).toContain('用 [换块] 时提醒他先在卡片上把状态打完分')
     expect(text).toContain('心情、睡眠、运动、饮食')
     expect(text).toContain('别替他往下问')
   })
 
-  it('这一块的最后一道题也问完时，[换块] 才转成「提醒去打分」', () => {
-    const lastIndex = (dimensionScript('growth')?.mainQuestions.length ?? 1) - 1
-    const state = stateWith(
-      { reconcile: { complete: true }, event: { complete: true }, growth: { askIndex: lastIndex } },
-      { stateDone: false, active: 'growth' },
-    )
-    const text = textOf(buildTurnPrompt(state, 'growth', history, PERSONA))
-    expect(text).toContain('用 [换块] 时提醒他先在卡片上把状态打完分')
-    expect(text).toContain('心情、睡眠、运动、饮食')
+  it('这一块是最后一块时，[换块] 的话术是收尾（还卡着状态卡就先去打分）', () => {
+    const allDoneBut = (stateDone: boolean) =>
+      stateWith(
+        {
+          reconcile: { complete: true },
+          event: { complete: true },
+          people: { complete: true },
+          thing: { complete: true },
+        },
+        { hasLastWeek: false, depth: 'mid', stateDone, active: 'growth' },
+      )
+
+    // 状态卡还没交：先提醒他打分，别含糊地收尾
+    const beforeState = textOf(buildTurnPrompt(allDoneBut(false), 'growth', history, PERSONA))
+    expect(beforeState).toContain('用 [换块] 时提醒他先在卡片上把状态打完分')
+    expect(beforeState).toContain('心情、睡眠、运动、饮食')
+
+    // 状态卡交过：这一块聊完就都聊完了，提示可以生成梳理
+    const allDone = textOf(buildTurnPrompt(allDoneBut(true), 'growth', history, PERSONA))
+    expect(allDone).toContain('用 [换块] 时，给一句自然的收尾，并告诉他可以生成这周的梳理了。')
   })
 
-  it('主问题聊完之后转成自由聊：不再念题目，只剩 [追问]/[换块]', () => {
+  it('要点聊完之后转成自由聊：不再念要点，只剩 [追问]/[换块]', () => {
     const state = stateWith(
       { event: { complete: true, freeTurns: 1 } },
       { hasLastWeek: false, depth: 'mid', active: 'event' },
@@ -348,12 +354,13 @@ describe('提示词 · 一轮追问判断', () => {
     const user = userOf(buildTurnPrompt(state, 'event', history, PERSONA))
 
     expect(user).toContain('自由聊')
-    expect(user).toContain('不要念题目')
+    expect(user).toContain('没有清单要过')
     expect(user).toContain('这一块只用这两个标记')
     expect(user).toContain('[追问]')
     expect(user).toContain('[换块]')
     expect(user).not.toContain('[换题]')
-    // 脚本里的下一条参考题目不该再被摆出来
+    // 要点表与「还没聊到的要点」都不该再被摆出来
+    expect(user).not.toContain('本区块的要点：')
     expect(user).not.toContain('有没有本来打算做、最后没动的事')
   })
 
@@ -383,23 +390,25 @@ describe('提示词 · 专属采访者', () => {
     expect(system).toContain('[追问]')
     expect(system).toContain('[换题]')
     expect(system).toContain('[换块]')
-    expect(system).toContain('不要堆成一长串')
+    expect(system).toContain('别堆成一长串')
     // 约定必须排在人设之后，不能被前面的话盖过去
     expect(system.indexOf('必须遵守')).toBeGreaterThan(system.indexOf(rogue))
   })
 
-  it('协议里写死了「参考题目是要问到什么，不是要你念的句子」', () => {
+  it('协议里写死了「要点表是要了解到什么，不是要你念的句子」', () => {
     const system = buildInterviewerSystem(PERSONA, { marker: true })
     expect(system).toContain(
-      '参考题目给的是**要问到什么**，不是要你念的句子：每一句都用你自己的话问，别照抄示例，也别一周又一周用同一句。',
+      '要点表给的是**要了解到什么**，不是要你念的句子：每一句都用你自己的话问，别照抄锚点示例，也别一周又一周用同一句。',
     )
-    expect(system).toContain('要问的那件事他没答到，就换个说法再问一次，不要跳过。')
+    // 旧协议那条「没答到就换个说法再问一次，不要跳过」被换成了「追到效果为止」——
+    // 要点是否聊到由收尾对账兜底，不再靠一句禁令。
+    expect(system).toContain('一个话题可以问到复盘的效果为止')
   })
 
   it('不需要标记的那几轮，就不把标记规则写进去', () => {
     const plain = buildInterviewerSystem(PERSONA, { marker: false })
     expect(plain).not.toContain('[追问]')
-    expect(plain).toContain('不要堆成一长串')
+    expect(plain).toContain('别堆成一长串')
   })
 
   it('人设留空时退回默认那套，而不是发出一段空的 system', () => {
@@ -533,12 +542,12 @@ describe('提示词 · 健壮性', () => {
  *
  * 这一步**推翻了 0.9.3 的一条约定**：那时提示词里连分数都不给模型看。
  * 现在必须给 —— 不问分数就问不出「睡眠 2/5 是为什么」。
- * 但边界没变：分只由界面写，模型只读；而且要问到的哪几项由客户端定，不由模型挑。
+ * 但边界没变：分只由界面写，模型只读；而且要聊到哪几项由客户端定，不由模型挑。
  */
 describe('提示词 · 状态追问', () => {
   const LOW = { stateScores: { sleep: 2, sport: 1 } }
 
-  it('开场把「他打了几分」和低分那两项要问到什么交给模型', () => {
+  it('开场把「他打了几分」和低分那两项要了解到什么交给模型', () => {
     const s = stateWith({}, { active: 'probe', lowKeys: ['sleep', 'sport'] })
     const text = userOf(buildOpeningPrompt(s, 'probe', [], PERSONA, LOW))
 
@@ -571,7 +580,7 @@ describe('提示词 · 状态追问', () => {
     expect(text).toContain('没有取到分数')
   })
 
-  it('一轮里告诉模型这一轮要问到哪一项，以及追问上限', () => {
+  it('一轮里把这一步的要点、当前缺口与追问上限都告诉模型', () => {
     const s = stateWith({}, { active: 'probe', depth: 'mid', lowKeys: ['sleep', 'sport'] })
     const history = [
       msg('ai', '睡不好是为什么？', 'probe'),
@@ -580,13 +589,13 @@ describe('提示词 · 状态追问', () => {
     const text = userOf(buildTurnPrompt(s, 'probe', history, PERSONA))
     expect(text).toContain('睡眠')
     expect(text).toContain('上限 2 次')
-    // 换项之后问的是第二项
+    // 还没聊到的第二项也摆出来了
     expect(text).toContain('运动')
   })
 
   it('进度里只在真有低分项时才提这一步，而且排在最前面', () => {
     const withLow = stateWith({}, { stateDone: true, lowKeys: ['sleep'] })
-    expect(formatProgress(withLow)).toContain('状态追问（问到第 1/1 项）')
+    expect(formatProgress(withLow)).toContain('状态追问（要点 0/1）')
     expect(formatProgress(withLow).startsWith('状态追问')).toBe(true)
 
     const without = stateWith({}, { stateDone: true })

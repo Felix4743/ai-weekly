@@ -18,6 +18,8 @@ describe('模型行首标记 · 解析', () => {
     expect(parseTurnReply('[追问]\n这件事哪一部分最花时间？')).toEqual({
       action: 'followup',
       message: '这件事哪一部分最花时间？',
+      // 0.9.5 起 [换块] 那一行会报覆盖，所以解析结果里恒有 covered
+      covered: [],
     })
   })
 
@@ -31,11 +33,12 @@ describe('模型行首标记 · 解析', () => {
     expect(parseTurnReply('[换块]这块先到这儿，接下来聊聊人。')).toEqual({
       action: 'block',
       message: '这块先到这儿，接下来聊聊人。',
+      covered: [],
     })
   })
 
-  it('没有任何标记时回退成换题：宁可少追问，也不能漏掉主问题', () => {
-    expect(parseTurnReply('那后来呢？')).toEqual({ action: 'next', message: '那后来呢？' })
+  it('没有任何标记时回退成换题：宁可少追问，也不能原地不动', () => {
+    expect(parseTurnReply('那后来呢？')).toEqual({ action: 'next', message: '那后来呢？', covered: [] })
   })
 
   it('容忍前导空白、全角空格和 BOM', () => {
@@ -55,8 +58,36 @@ describe('模型行首标记 · 解析', () => {
   })
 
   it('空输入、非字符串都不炸，并按换题兜底', () => {
-    expect(parseTurnReply('')).toEqual({ action: 'next', message: '' })
-    expect(parseTurnReply(undefined as unknown as string)).toEqual({ action: 'next', message: '' })
+    expect(parseTurnReply('')).toEqual({ action: 'next', message: '', covered: [] })
+    expect(parseTurnReply(undefined as unknown as string)).toEqual({
+      action: 'next',
+      message: '',
+      covered: [],
+    })
+  })
+
+  it('[换块] 那一行报的覆盖会被读出来：序号 1 起、去重、认不出就是空数组', () => {
+    // 0.9.5 起收尾时必须报覆盖，客户端靠它算出「这一块还差哪几样」
+    expect(parseTurnReply('[换块] 覆盖:1,3').covered).toEqual([1, 3])
+    expect(parseTurnReply('[换块] 覆盖：1、3').covered).toEqual([1, 3])
+    expect(parseTurnReply('[换块] 覆盖: 1 3').covered).toEqual([1, 3])
+    expect(parseTurnReply('[换块] 覆盖:3,1,3').covered).toEqual([3, 1])
+    // 序号从 1 起：0 是模型乱写的，丢掉
+    expect(parseTurnReply('[换块] 覆盖:0').covered).toEqual([])
+    // 没报、或者报得一塌糊涂，都不抛，按空数组走
+    expect(parseTurnReply('[换块]这块先到这儿。').covered).toEqual([])
+    expect(parseTurnReply('[换块] 覆盖:看情况').covered).toEqual([])
+  })
+
+  it('覆盖声明不会留在正文里，也不会漏到界面上', () => {
+    const r = parseTurnReply('[换块] 覆盖:1,3\n这块先到这儿。')
+    expect(r.action).toBe('block')
+    expect(r.covered).toEqual([1, 3])
+    expect(r.message).toBe('这块先到这儿。')
+
+    // 流式那一路同样要摘掉，否则界面上会闪出「覆盖:1,3」
+    expect(stripMarkerForDisplay('[换块] 覆盖:1,3\n这块先到这儿。', true)).toBe('这块先到这儿。')
+    expect(stripMarkerForDisplay('[追问]然后呢？\n覆盖:2', true)).toBe('然后呢？')
   })
 })
 

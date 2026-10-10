@@ -1,5 +1,5 @@
 import { stateField } from './stateFields'
-import type { QuestionSpec } from './script'
+import type { PointSpec } from './script'
 import { coerceScore } from './stateScore'
 import { STATE_KEYS, type StateKey, type StateScores } from './types'
 
@@ -88,16 +88,16 @@ export function lowScoreKeys(scores: StateScores | undefined): StateKey[] {
 }
 
 /**
- * 把低分项摊成一道道题：一项一道，顺序即提问顺序。
+ * 把低分项摊成这一块要聊的几个**要点**：一项一个，顺序即打分卡上的顺序。
  *
- * 状态机拿它当 `probe` 这一步的主问题清单 —— 所以「问完几道算完」是算得清的，
- * 而且每道题各有各的追问额度（换题时 `followUpCount` 归零）。
+ * 状态机拿它当 `probe` 这一步的要点表 —— 所以「聊到几样算聊完」是算得清的，
+ * 而「怎么问、先问哪个」还是模型的事。
  */
-export function probeQuestions(keys: readonly StateKey[]): QuestionSpec[] {
+export function probePoints(keys: readonly StateKey[]): PointSpec[] {
   return keys.map((key) => {
     const spec = PROBE_INTENTS[key]
     const label = stateField(key)?.label ?? key
-    return { intent: `${label}：${spec.intent}`, examples: spec.examples }
+    return { id: `probe-${key}`, intent: `${label}：${spec.intent}`, anchors: spec.examples }
   })
 }
 

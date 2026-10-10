@@ -32,19 +32,34 @@ export interface ChatMessage {
   at: number
 }
 
-/** 单个区块的进度 */
+/**
+ * 单个区块的进度。
+ *
+ * 0.9.5 起这里**没有「题号」了**：块内没有固定题序，「问到第几题」这个概念被
+ * 「哪几个要点已经聊到」取代（见 `script.ts` 的 `PointSpec`）。
+ */
 export interface BlockProgress {
-  /** 当前问到该区块的第几个主问题 */
-  askIndex: number
-  /** 当前主问题上已经追问了几次 */
+  /**
+   * 这一块聊了几个回合。
+   * 只用于防打转的兜底（`MAX_TURNS_PER_BLOCK`），不代表「问到第几题」。
+   */
+  asked: number
+  /** 同一个话题连着追了几次；换题 / 换块时归零（防审讯的上限，跟着档位走） */
   followUpCount: number
-  /** 该区块的主问题是否已经问完 */
+  /** 这一块收尾了没有 */
   complete: boolean
   /**
-   * 主问题问完之后，用户自己主动接着说下去的轮数。
+   * 收尾之后，用户自己主动接着说下去的轮数。
    * 刻意不计入覆盖率：该聊的都聊过了，后面是用户想多聊，不该让进度条倒着走。
    */
   freeTurns: number
+  /** 已经聊到的要点 id；收尾对账靠它算出「还差哪几样」 */
+  covered: string[]
+  /**
+   * 收尾时发现要点没聊到、于是客户端补问了几次。
+   * 补满 `MAX_NUDGES` 次还不齐就放行 —— 宁可少聊一样，也不要变成审讯。
+   */
+  nudges: number
 }
 
 export type BlockProgressMap = Record<Dimension, BlockProgress>

@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { LOW_SCORE_MAX, lowScoreItems, lowScoreKeys, probeQuestions, scoresLine } from './probe'
+import { LOW_SCORE_MAX, lowScoreItems, lowScoreKeys, probePoints, scoresLine } from './probe'
 import { SCORE_MAX } from './stateScore'
 import { STATE_KEYS } from './types'
 
 /**
- * 0.9.4 的新那一步：打完分之后**按分数**决定接着问什么。
+ * 0.9.4 的新那一步：打完分之后**按分数**决定接着聊什么。
  *
  * 用户的原话是「第一步打完分之后就没后续了……我想打完分之后才根据打分情况进行提问」，
  * 举的例子是「睡眠不好是为什么」「运动不够是为什么可以挤时间吗」。
- * 这一组用例盯的就是「哪几项值得追」和「追的时候要问到什么」这两件事。
+ * 这一组用例盯的就是「哪几项值得聊」和「聊的时候要了解到什么」这两件事。
+ *
+ * 0.9.5 起它交给状态机的不再是「一道道题」，而是**几个要点**（`PointSpec`），
+ * 所以这里同时盯着 id —— 收尾对账与「这题跳过」都靠 id 认人。
  */
 
 describe('状态追问 · 哪几项算低分', () => {
-  it('分低线是 2 星：2 分及以下都要追', () => {
+  it('分低线是 2 星：2 分及以下都要聊', () => {
     expect(LOW_SCORE_MAX).toBe(2)
     expect(lowScoreKeys({ sleep: SCORE_MAX })).toEqual([])
     expect(lowScoreKeys({ sleep: 3 })).toEqual([])
@@ -40,8 +43,8 @@ describe('状态追问 · 哪几项算低分', () => {
   })
 })
 
-describe('状态追问 · 要问到什么', () => {
-  it('每一项都给出「要问到什么」加示例，且示例是问句', () => {
+describe('状态追问 · 要了解到什么', () => {
+  it('每一项都给出「要了解到什么」加锚点，且锚点是问句', () => {
     const items = lowScoreItems({ mood: 2, sleep: 1, sport: 2, diet: 2 })
     expect(items).toHaveLength(4)
     for (const item of items) {
@@ -65,7 +68,7 @@ describe('状态追问 · 要问到什么', () => {
     expect(sport.examples.join('')).toContain('挤')
   })
 
-  it('追问落点是原因与腾挪空间，不是评判 —— 一句「为什么没做到」都没有', () => {
+  it('落点是原因与腾挪空间，不是评判 —— 一句「为什么没做到」都没有', () => {
     const intents = lowScoreItems({ mood: 1, sleep: 1, sport: 1, diet: 1 }).map((i) => i.intent)
     for (const text of intents) {
       expect(text).not.toContain('为什么没')
@@ -73,22 +76,24 @@ describe('状态追问 · 要问到什么', () => {
     }
   })
 
-  it('摊成题目时带上项名，一项一道、顺序不变', () => {
-    const questions = probeQuestions(['sleep', 'sport'])
-    expect(questions).toHaveLength(2)
-    expect(questions[0].intent).toContain('睡眠')
-    expect(questions[1].intent).toContain('运动')
-    expect(questions[0].intent).not.toBe(questions[1].intent)
+  it('摊成要点时带上项名与稳定 id，一项一个、顺序不变', () => {
+    const points = probePoints(['sleep', 'sport'])
+    expect(points).toHaveLength(2)
+    expect(points[0].intent).toContain('睡眠')
+    expect(points[1].intent).toContain('运动')
+    expect(points[0].intent).not.toBe(points[1].intent)
+    // id 要稳定：收尾对账与「这题跳过」都靠它认人
+    expect(points.map((p) => p.id)).toEqual(['probe-sleep', 'probe-sport'])
   })
 
-  it('没有低分项就是零道题 —— 那一步整步不存在', () => {
-    expect(probeQuestions([])).toEqual([])
+  it('没有低分项就是零个要点 —— 那一步整步不存在', () => {
+    expect(probePoints([])).toEqual([])
     expect(lowScoreItems(undefined)).toEqual([])
   })
 
-  it('两项都低时，两道题的内容确实不一样（不是同一句念两遍）', () => {
-    const [first, second] = probeQuestions(['sleep', 'sport'])
-    expect(first.examples).not.toEqual(second.examples)
+  it('两项都低时，两个要点的锚点确实不一样（不是同一句念两遍）', () => {
+    const [first, second] = probePoints(['sleep', 'sport'])
+    expect(first.anchors).not.toEqual(second.anchors)
     expect(first.intent).not.toBe(second.intent)
   })
 })

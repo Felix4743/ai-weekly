@@ -5,12 +5,15 @@ import { createAiClient } from './core/createAiClient'
 import {
   coveragePercent,
   createInterview,
-  currentQuestionSpec,
+  currentPoint,
+  currentPointNumber,
   finishAll,
   isBlockComplete,
   nextStage,
   nextStep,
+  nudgeBack,
   openBlock,
+  planBlockEnd,
   setDepth,
   setStateDone,
 } from './core/interview'
@@ -379,7 +382,24 @@ export default function App() {
       try {
         // 一次调用同时拿到「这一轮想干什么」和「下一句话」
         const turn = await ai.reply(interviewRef.current, dim, messagesRef.current, pushDelta)
-        const advanced = nextStep(interviewRef.current, dim, turn.action)
+        let advanced = nextStep(interviewRef.current, dim, turn.action, { covered: turn.covered })
+
+        /**
+         * 模型说「这一块聊完了」时**不直接信**：先收尾对账，看还有哪个要点没聊到。
+         *
+         * 模型报了覆盖也照样对账 —— 它可能漏报，也可能把没聊到的算成聊到了。
+         * 还差着就替它补问一句（`MAX_NUDGES` 次，之后放行）：宁可少聊一样，
+         * 也不要因为一次漏报就把这一块整个跳过去。
+         */
+        const plan = turn.action === 'block' ? planBlockEnd(advanced, dim) : null
+        if (plan?.nudge && plan.ask) {
+          advanced = nudgeBack(advanced, dim)
+          commitInterview(advanced)
+          // 补问用那个要点的锚点问法顶上 —— 不发请求，跟「这题跳过」是同一条路数
+          commitMessages([...messagesRef.current, aiMessage(spoken(plan.ask), dim)])
+          setError(null)
+          return
+        }
 
         // 模型判定「这块聊够了」（[换块]）：顺手把流程里的下一块打开，别让他再点一次。
         // 下一步是「定档」或「全聊完了」时不自动往下走，那两种要留给用户决定。
@@ -462,12 +482,12 @@ export default function App() {
   /**
    * 「这题跳过」：用户提的「我有很多问题是没有感觉的，可以加个没有按键」。
    *
-   * 点一下直接推进到下一题 —— **不发请求、也不在记录里留「跳过了」这种痕迹**。
-   * 状态机照常走一步（等价于模型给了 `[换题]`），所以每块的题目条数、追问计数、
-   * 覆盖率都不受影响。
+   * 点一下直接推进到下一个要点 —— **不发请求、也不在记录里留「跳过了」这种痕迹**。
+   * 跳过 = 「这一点我没什么可说的」，所以顺手把它记成聊到了，否则下一个要点的
+   * 锚点问法会把同一句又问一遍。
    *
-   * 但**下一题得亮出来**：不发请求就没有新文本，屏幕上会一直停着上一题，
-   * 点完看着像没反应。所以这里用客户端的那句参考问法（`spoken`）顶上 ——
+   * 但**下一个要点得亮出来**：不发请求就没有新文本，屏幕上会一直停着上一句，
+   * 点完看着像没反应。所以这里用客户端那句锚点问法（`spoken`）顶上 ——
    * 跟「模型什么都没说」时的兜底是同一句，不是新造一套。
    */
   const handleSkip = useCallback(() => {
@@ -475,19 +495,22 @@ export default function App() {
     if (!dim || busyRef.current) return
 
     const wasComplete = isBlockComplete(interviewRef.current, dim)
-    const advanced = nextStep(interviewRef.current, dim, 'next')
+    const at = currentPointNumber(interviewRef.current, dim)
+    const advanced = nextStep(interviewRef.current, dim, 'next', {
+      covered: at === undefined ? [] : [at],
+    })
     commitInterview(advanced)
 
-    // 主问题本来就问完了（自由聊）没什么可跳的
+    // 要点本来就聊完了（自由聊）没什么可跳的
     if (wasComplete) return
 
     if (!isBlockComplete(advanced, dim)) {
-      const question = spoken(currentQuestionSpec(advanced, dim))
+      const question = spoken(currentPoint(advanced, dim))
       if (question) commitMessages([...messagesRef.current, aiMessage(question, dim)])
       return
     }
 
-    // 跳掉的正好是这一块最后一道：跟 [换块] 一样顺手把下一块打开，让它先开口
+    // 跳掉的正好是这一块最后一个要点：跟 [换块] 一样顺手把下一块打开，让它先开口
     const stage = nextStage(advanced)
     if (stage.kind === 'block' && stage.dim !== dim) void handleOpenBlock(stage.dim)
   }, [commitInterview, commitMessages, handleOpenBlock])

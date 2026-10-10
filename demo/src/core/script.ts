@@ -1,21 +1,27 @@
 import type { Depth, Dimension } from './types'
 
 /**
- * 一道参考题：**只给意思，不给成品句子**。
+ * 一个**要点**：聊完这一块时，应该已经知道的东西。
  *
- * 0.9.2 之前这里是一句写死的话，模型照着念，一周又一周都是同一句，
- * 用户的原话是「别跟个人机一样问，谁愿意聊？」。
- * 0.9.3 起每题只写「这一轮要问到什么」+ 一两句示例；措辞交给模型，
- * 客户端仍然管顺序与覆盖面（该问到的没问出来，不许换题）。
+ * 0.9.5 之前这里是「主问题清单」—— 每块 6 / 4 / 4 / 2 道题，按顺序一道一道问，
+ * `[换题]` 的语义是「这一题问到了」。用户的原话是「问法还是太机械了」，
+ * 具体感受是「它不看我在聊什么，照着自己的清单走」「不该问的题它还是问」。
+ * 根不在措辞，在**结构**：固定的条数加固定的顺序，读起来就是一张表单。
  *
- * `examples` 只有两处会用到：提示词里当参考（明确写了别照抄），
- * 以及演示模式（没填 Key）时假 AI 的台词 —— 那台假 AI 不会说话，只能念一句。
+ * 现在每块只声明「要了解到这几样」，**顺序、条数、深度全交给模型**：
+ * 一句话可能同时答到两个要点，用户聊到哪就跟到哪。客户端只做一件事 ——
+ * 这一块收尾时对账：还有哪个要点没聊到。
+ *
+ * `intent` 是目标（给模型看的，不是台词）；`anchors` 是「帮人想起来」的锚点示例，
+ * 只在演示模式与补问兜底时被念出来。
  */
-export interface QuestionSpec {
-  /** 这一轮要问到什么（意思是给模型看的，不是要念的句子） */
+export interface PointSpec {
+  /** 稳定标识，收尾对账与用例都用它；给模型看的是它在这一块里的序号（1 起） */
+  id: string
+  /** 要了解到什么（意思是给模型看的，不是要念的句子） */
   intent: string
-  /** 示例问法，只是意思 */
-  examples: string[]
+  /** 锚点示例，只是意思 */
+  anchors: string[]
 }
 
 export interface DimensionScript {
@@ -25,24 +31,21 @@ export interface DimensionScript {
   hint: string
   /**
    * `block` = 内容块，界面上有 tab、算进度；
-   * `step` = 流程里夹着的一道小题（目前只有「上周对账」），不占进度。
+   * `step` = 流程里夹着的一道小题（状态追问 / 上周对账），不占进度。
    */
   kind: 'block' | 'step'
   /**
-   * 该区块的参考主问题。
+   * 这一块要聊到的几样。**没有顺序含义** —— 模型自己决定先聊哪个、怎么聊。
    *
-   * 什么时候换下一块由模型判定（见 turn.ts 的 `[换块]`），
-   * 这份清单只是给模型的目标和兜底。**块内的顺序仍然是固定的** ——
-   * 顺序与覆盖面是产品的骨架，怎么说是模型的自由。
+   * 0.9.5 的题量口径：事情 4 / 人际 3 / 物品 3 / 成长 2 = 12 个要点。
+   * 状态追问那一步的要点按分数现算（见 `probe.ts`），所以这里是空的。
    */
-  mainQuestions: QuestionSpec[]
-  /** 追问池：说到才追，不硬问 */
-  followUps: QuestionSpec[]
-  /** 聊开了才问的题（可选），没聊到就不提 */
-  optionalQuestions?: QuestionSpec[]
+  points: PointSpec[]
+  /** 往具体里追的方向（一句话给方向，**不再是可轮取的追问清单**） */
+  digInto?: string
 }
 
-/** 复盘深度：一句话问法 + 大概时长 + 每道主问题最多追问几次 */
+/** 复盘深度：一句话问法 + 大概时长 + 连续追问最多几次 */
 export interface DepthSpec {
   id: Depth
   label: string
@@ -50,7 +53,7 @@ export interface DepthSpec {
   phrase: string
   /** 大概要多久，写进提示词，让模型自己掌握节奏 */
   minutes: number
-  /** 每道主问题最多追问几次；深度档也不设死，靠「问到效果」判定 */
+  /** 同一个话题最多连着追几次；深度档也不设死，靠「问到效果」判定 */
   followUpCap: number
   /** 这块节奏怎么把握 */
   guidance: string
@@ -64,7 +67,7 @@ export const DEPTHS: DepthSpec[] = [
     minutes: 20,
     followUpCap: 5,
     guidance:
-      '对方状态不错，可以聊深：每块的问题都问，追问到把一件事讲透，鼓励他多说细节和当时的想法。',
+      '对方状态不错，可以聊深：每个要点都聊到，追问到把一件事讲透，鼓励他多说细节和当时的想法。',
   },
   {
     id: 'mid',
@@ -72,7 +75,7 @@ export const DEPTHS: DepthSpec[] = [
     phrase: '正常聊，可以吗？',
     minutes: 12,
     followUpCap: 2,
-    guidance: '每块都把主要问题问一遍，追问点到为止，一个问题问清了就往下走。',
+    guidance: '每个要点都过一遍，追问点到为止，一件事问清了就往下走。',
   },
   {
     id: 'fast',
@@ -81,7 +84,7 @@ export const DEPTHS: DepthSpec[] = [
     minutes: 5,
     followUpCap: 1,
     guidance:
-      '时间紧或状态差：每块只抓一两个关键问题，不追问，对方不想展开就顺势往下走。',
+      '时间紧或状态差：每块只聊最要紧的一两个要点，不追问，对方不想展开就顺势往下走。',
   },
 ]
 
@@ -102,9 +105,21 @@ export function depthSpec(depth: Depth | null): DepthSpec | undefined {
   return DEPTHS.find((d) => d.id === depth)
 }
 
-/** 演示模式要念的那一句：取第一条示例 */
-export function spoken(spec: QuestionSpec | undefined): string {
-  return spec?.examples[0] ?? ''
+/**
+ * 一块最多聊几个回合（防打转的兜底）。
+ *
+ * 没有主问题清单之后，「这一块聊完了没有」全靠模型自己说 `[换块]`。
+ * 万一它一直不换、或者用户一直在追同一件事，这里给它一个上限：
+ * 到了就收尾，宁可少聊一样，也不要把人按在这儿。
+ */
+export const MAX_TURNS_PER_BLOCK = 10
+
+/** 收尾对账发现要点没聊到时，客户端最多补问几次；补完仍不齐就放行 */
+export const MAX_NUDGES = 2
+
+/** 演示模式要念的那一句：取第一个锚点 */
+export function spoken(point: PointSpec | undefined): string {
+  return point?.anchors[0] ?? ''
 }
 
 /**
@@ -114,10 +129,7 @@ export function spoken(spec: QuestionSpec | undefined): string {
  * 更前面还有开场那张状态打分卡（不在 SCRIPT 里，它是客户端的一屏）。
  * 成长放最后是用户定的：先把做过的事、跟人的事、钱的事理完，最后聊长了什么见识。
  *
- * `probe`（状态追问，0.9.4 新加）排在第一个内容块之前，因为它问的就是开场那张卡
- * 上的分数 —— 打完分紧接着问「睡眠 2/5 是为什么」，不隔夜。
- * 它的题目**不在下面写死**：问几道、问哪几项由分数决定（见 `probe.ts`），
- * 所以 `mainQuestions` 是空的，由 `interview.ts` 的 `mainQuestionsFor` 现算。
+ * 块与块之间的顺序仍然固定（那是流程），**块内不再有顺序**。
  */
 export const SCRIPT: DimensionScript[] = [
   {
@@ -125,9 +137,9 @@ export const SCRIPT: DimensionScript[] = [
     label: '状态追问',
     hint: '分低的那几项，是什么挡着的',
     kind: 'step',
-    // 题目按分数现算（≤ 2 星的项各一道），见 probe.ts 的 probeQuestions
-    mainQuestions: [],
-    followUps: [],
+    // 要点按分数现算（≤ 2 星的项各一个），见 probe.ts 的 probePoints
+    points: [],
+    digInto: '往具体里追：是什么挡着、能不能挪开、以前试过什么办法。',
   },
   {
     key: 'reconcile',
@@ -135,157 +147,121 @@ export const SCRIPT: DimensionScript[] = [
     hint: '上周定的事，实际落到了哪儿',
     kind: 'step',
     // 真正的问法由提示词用上一周的「下周重点 / 要跟进的人」现场拼出来
-    mainQuestions: [
+    points: [
       {
-        intent: '上周定的那几件事实际落到了哪儿',
-        examples: ['上周定的那几件事，实际落到了哪儿？'],
+        id: 'reconcile-kept',
+        intent: '上周定下的那几件事实际落到了哪儿',
+        anchors: ['上周定的那几件事，实际落到了哪儿？'],
       },
     ],
-    followUps: [
-      { intent: '哪一步卡住了', examples: ['哪一步卡住了？'] },
-      { intent: '下周还接着做吗', examples: ['下周还接着做吗？'] },
-    ],
+    digInto: '往具体里追：哪一步卡住了、下周还接着做吗。',
   },
   {
     key: 'event',
     label: '事情',
     hint: '这周做了什么、卡在哪',
     kind: 'block',
-    mainQuestions: [
-      { intent: '这周主要在忙什么', examples: ['这周主要在忙什么？'] },
+    points: [
       {
+        id: 'event-focus',
+        intent: '这周的时间主要花在哪儿、重心落在哪件事上',
+        anchors: ['这周大部分时间都花在哪儿了？', '这周主要忙的是哪一件事？'],
+      },
+      {
+        id: 'event-stuck',
         intent: '有没有本来打算做、最后没动的事，卡在哪一步',
-        examples: ['有没有本来打算做、最后没动的事？卡在哪一步？'],
+        anchors: ['有件本来想做的事，最后没动？卡在哪一步了？', '这周有什么一直没推进的？'],
       },
       {
-        intent: '这周有没有一个当时挺拿不准的决定',
-        examples: ['这周有没有一个决定，你当时挺拿不准的？'],
+        id: 'event-unsure',
+        intent: '这周有没有一个当时拿不准的决定，后来是怎么定的',
+        anchors: ['这周有没有哪个决定，你当时挺拿不准的？', '后来是怎么定下来的？'],
       },
       {
-        intent: '这周有没有突然插进来、把计划打乱的事',
-        examples: ['这周有没有突然插进来、把计划打乱的事？'],
-      },
-      { intent: '这周有没有干了点新鲜的', examples: ['这周有没有干了点什么新鲜的？'] },
-      {
-        intent: '有没有一直想做、却一直没动的事，卡在哪儿',
-        examples: ['有没有一直想做、却一直没动的事？卡在哪儿了？'],
+        id: 'event-interrupt',
+        intent: '有没有突然插进来、把计划打乱的事，或者顺手干了点什么新的',
+        anchors: ['这周有没有突然插进来、把计划打乱的事？', '有没有顺手干了点新鲜的？'],
       },
     ],
-    followUps: [
-      { intent: '这件事最花时间的是哪一块', examples: ['这件事最花时间的是哪一块？'] },
-      { intent: '后来结果怎么样', examples: ['后来结果怎么样？'] },
-      { intent: '当时是怎么处理的', examples: ['当时你是怎么处理的？'] },
-      {
-        intent: '时间大概是怎么分的、哪块最不值',
-        examples: ['时间大概是怎么分的？哪块最不值？'],
-      },
-      { intent: '后来是怎么定的', examples: ['后来是怎么定的？'] },
-      { intent: '现在回头看还这么想吗', examples: ['现在回头看，还这么想吗？'] },
-    ],
+    digInto: '往具体里追：这件事最花时间的是哪一块、后来结果怎么样、当时卡在哪一步。',
   },
   {
     key: 'people',
     label: '人际',
     hint: '和谁有关，卡在哪里',
     kind: 'block',
-    mainQuestions: [
-      { intent: '这周跟谁打交道最多', examples: ['这周跟谁打交道最多？'] },
+    points: [
       {
-        intent: '有没有想联系、但一直没联系的人，是因为什么',
-        examples: ['有没有想联系、但一直没联系的人？是因为什么？'],
+        id: 'people-most',
+        intent: '这周跟谁打交道最多，为的是什么事',
+        anchors: ['这周跟谁打交道最多？为了什么事？'],
       },
       {
-        intent: '这周有没有一次沟通事后觉得没说到位，下次会怎么开口',
-        examples: ['这周有没有一次沟通，事后觉得没说到位？下次你会怎么开口？'],
+        id: 'people-missed',
+        intent: '有没有想联系、但一直没联系的人，是什么挡着',
+        anchors: ['有没有想联系、但一直没联系的人？是什么挡着？'],
       },
       {
-        intent: '这周有没有谁的哪句话、哪个做法让他不舒服',
-        examples: ['这周有没有谁的哪句话、哪个做法让你不舒服？'],
-      },
-    ],
-    followUps: [
-      { intent: '有没有哪件事卡在对方那儿', examples: ['有没有哪件事卡在对方那儿？'] },
-      { intent: '后来这事你们怎么说的', examples: ['后来这事你们怎么说的？'] },
-      {
-        intent: '这个人最近有什么让他印象深的',
-        examples: ['这个人最近有什么让你印象深的？'],
-      },
-      {
-        intent: '有没有谁，其实该开口求助或者该谢一声',
-        examples: ['有没有谁，你其实该开口求助，或者该谢一声？'],
+        id: 'people-awkward',
+        intent: '有没有一次沟通事后觉得没说到位，或者谁的哪句话让他不舒服',
+        anchors: [
+          '这周有没有哪次沟通，事后觉得没说到位？下次会怎么开口？',
+          '有没有谁的哪句话，让你不太舒服？',
+        ],
       },
     ],
-    optionalQuestions: [
-      {
-        intent: '有没有一阵子没联系、其实该问候一声的人',
-        examples: ['有没有一阵子没联系、其实该问候一声的人？'],
-      },
-    ],
+    digInto: '往具体里追：这件事卡在对方哪儿、后来你们怎么说的、你现在怎么看这个人。',
   },
   {
     key: 'thing',
     label: '物品与支出',
     hint: '实物、花销与订阅、该维护的事，都算这块',
     kind: 'block',
-    mainQuestions: [
-      { intent: '这周买了点什么、用上了吗', examples: ['这周买了点什么？用上了吗？'] },
+    points: [
       {
-        intent: '有没有买了之后一直没用上的，当时是怎么下的决心',
-        examples: ['有没有买了之后一直没用上的？当时是怎么下的决心？'],
+        id: 'thing-bought',
+        intent: '这周买了什么、用上了吗；买了之后一直没用上的也算',
+        anchors: ['这周买了点什么？用上了吗？', '有没有买了之后一直没用上的？'],
       },
       {
-        intent: '有没有一直拖着没续、没修、没收拾的',
-        examples: ['有没有一直拖着没续、没修、没收拾的？'],
+        id: 'thing-delayed',
+        intent: '有没有一直拖着没续、没修、没收拾的事',
+        anchors: ['有什么一直拖着没续、没修、没收拾的？'],
       },
       {
-        intent: '这周花钱的地方多吗、有没有哪笔花完有点心疼',
-        examples: ['这周花钱的地方多吗？有没有哪笔花完有点心疼？'],
+        id: 'thing-money',
+        intent: '这周的钱主要花在哪儿，有没有哪笔花完有点心疼',
+        anchors: ['这周钱主要花在哪儿了？', '有没有哪笔花完有点心疼？'],
       },
     ],
-    followUps: [
-      {
-        intent: '有没有处理掉、退掉或者卖掉的东西',
-        examples: ['有没有处理掉、退掉或者卖掉的东西？'],
-      },
-      { intent: '现在回头看这笔花得值吗', examples: ['现在回头看，这笔花得值吗？'] },
-    ],
+    digInto: '往具体里追：这笔花得值不值、当时是怎么下的决心、拖着没做是因为什么。',
   },
   {
     key: 'growth',
     label: '成长',
     hint: '这周长了什么见识、想通了什么',
     kind: 'block',
-    mainQuestions: [
+    points: [
       {
+        id: 'growth-learned',
         intent: '这周看了什么、听了什么，或者跟谁聊出点东西',
-        examples: [
-          '这周看了什么、听了什么，或者跟谁聊出点东西？',
-          '这周有没有从哪儿学到点什么？',
-        ],
+        anchors: ['这周看了什么、听了什么，或者跟谁聊出点东西？'],
       },
       {
+        id: 'growth-shift',
         intent: '这周有没有哪件事，让他换了个角度看',
-        examples: [
-          '这周有没有哪件事，让你换了个角度？',
-          '有没有什么事，你现在的看法跟以前不一样了？',
-        ],
+        anchors: ['有没有哪件事，你现在的看法跟以前不一样了？', '这事你以前是怎么看它的？'],
       },
     ],
-    followUps: [
-      { intent: '这点打算怎么用上', examples: ['这点你打算怎么用上？'] },
-      { intent: '这事以前是怎么看它的', examples: ['这事你以前是怎么看它的？'] },
-      { intent: '下周想试点什么', examples: ['下周想试点什么？'] },
-    ],
+    digInto: '往具体里追：这点你打算怎么用上、以前你是怎么看的。',
   },
 ]
 
 /** 内容块（有 tab、算进度的那几块） */
 export const CONTENT_BLOCKS = SCRIPT.filter((d) => d.kind === 'block')
 
-export const TOTAL_MAIN_QUESTIONS = CONTENT_BLOCKS.reduce(
-  (n, d) => n + d.mainQuestions.length,
-  0,
-)
+/** 四个内容块一共几个要点（0.9.5 起是 12） */
+export const TOTAL_POINTS = CONTENT_BLOCKS.reduce((n, d) => n + d.points.length, 0)
 
 /** 没有上一周记录时，对账这一步直接跳过 */
 export const RECONCILE_KEY: Dimension = 'reconcile'
@@ -301,10 +277,20 @@ export function dimensionScript(key: Dimension): DimensionScript | undefined {
   return SCRIPT.find((d) => d.key === key)
 }
 
-export function questionsInBlock(dim: Dimension): QuestionSpec[] {
-  return dimensionScript(dim)?.mainQuestions ?? []
+export function pointsOf(dim: Dimension): PointSpec[] {
+  return dimensionScript(dim)?.points ?? []
 }
 
 export function isContentBlock(dim: Dimension): boolean {
   return CONTENT_BLOCKS.some((d) => d.key === dim)
+}
+
+/** 给模型看的序号是 1 起的；报覆盖、补问都按这个号走 */
+export function pointNumber(index: number): number {
+  return index + 1
+}
+
+/** 按序号（1 起）取要点；越界返回 undefined，别抛 */
+export function pointByNumber(points: readonly PointSpec[], n: number): PointSpec | undefined {
+  return points[n - 1]
 }

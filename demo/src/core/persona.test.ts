@@ -86,6 +86,9 @@ describe('专属采访者 · 改不掉的约定', () => {
     expect(text).toContain('[换题]')
     expect(text).toContain('[换块]')
     expect(text).toContain('第二行开始才是你要说的话')
+    // 0.9.5 起 [换块] 多了「同一行报覆盖」的义务，标记说明必须把它写清楚
+    expect(text).toContain('必须在同一行报上你聊到的要点序号')
+    expect(text).toContain('[换块] 覆盖:1,3')
   })
 
   it('不需要表态的那几轮，就不提标记这回事', () => {
@@ -95,11 +98,14 @@ describe('专属采访者 · 改不掉的约定', () => {
     expect(text).not.toContain('第一行必须')
   })
 
-  it('一次别把问题堆成长串，也不要 markdown 和 JSON', () => {
+  it('先说一句接住他的话，别把问题堆成长串，也不要 markdown 和 JSON', () => {
     const text = withoutMarker()
-    expect(text).toContain('只输出你要说的那一句话')
+    // 0.9.5 起协议第一条换了方向：不再要求「只输出你要说的那一句话」，
+    // 改为要求先接住对方的话 —— 用户的原话是「问法还是太机械了」
+    expect(text).toContain('**先说一句接住他的话**')
+    expect(text).not.toContain('不要前缀解释')
     expect(text).toContain('可以问一到三个小问题')
-    expect(text).toContain('不要堆成一长串')
+    expect(text).toContain('别堆成一长串')
     expect(text).toContain('不要列清单')
     expect(text).toContain('不要 markdown')
   })
@@ -112,15 +118,16 @@ describe('专属采访者 · 改不掉的约定', () => {
 
   it('采访阶段保持中立：不说教、不贴标签、不编造', () => {
     const text = withoutMarker()
-    expect(text).toContain('不说教、不替对方下结论、不贴标签')
+    expect(text).toContain('不说教、不替他下结论、不贴标签')
     expect(text).toContain('不要编造对方没说过的事')
   })
 
   it('整段话有长度上限', () => {
-    expect(withoutMarker()).toContain('不超过 160 字')
+    // 0.9.5 起上限从 160 字放到 200 字
+    expect(withoutMarker()).toContain('不超过 200 字')
   })
 
-  // 0.9.3 起多了一条「参考题目给的是要问到什么，不是要你念的句子」，所以是五条
+  // 0.9.5 起那一条改成了「要点表给的是要了解到什么，不是要你念的句子」，仍是五条
   it('约定一共五条并按序号排好，标记规则接在最后当第六条', () => {
     const plain = withoutMarker()
     expect(plain).toContain('1. ')
@@ -132,10 +139,10 @@ describe('专属采访者 · 改不掉的约定', () => {
     expect(marked.indexOf('6. ')).toBeGreaterThan(marked.indexOf('5. '))
   })
 
-  it('参考题目只给意思：别照抄示例，也别一周又一周用同一句', () => {
+  it('要点表只给意思：别照抄锚点示例，也别一周又一周用同一句', () => {
     const text = withoutMarker()
-    expect(text).toContain('参考题目给的是**要问到什么**，不是要你念的句子')
-    expect(text).toContain('别照抄示例')
+    expect(text).toContain('要点表给的是**要了解到什么**，不是要你念的句子')
+    expect(text).toContain('别照抄锚点示例')
     expect(text).toContain('别一周又一周用同一句')
   })
 
