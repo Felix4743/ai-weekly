@@ -35,8 +35,17 @@ interface Props {
   onNoteChange: (text: string) => void
   /** 状态卡交上去了：接下来该定档 */
   onStateDone: () => void
-  /** 这题没什么可说的：直接推进到下一题（不调模型、不留痕迹） */
+  /** 这题没什么可说的：直接推进到下一个要点（不调模型、不留痕迹） */
   onSkip: () => void
+  /**
+   * 上一块收尾时还差着的要点 —— 只在输入框上方给一条提示，由用户决定补不补。
+   * `null` 表示没有（或者用户已经点掉了）。
+   */
+  missed: { dim: Dimension; labels: string[] } | null
+  /** 用户点了「接着补」：切回那一栏、把块重新打开 */
+  onReopen: () => void
+  /** 用户点了「算了」 */
+  onDismissMissed: () => void
   /** 从头再聊一遍（这周已记的不看、不并） */
   onStartFresh: () => void
   onGenerate: () => void
@@ -60,6 +69,9 @@ export function ChatPage({
   onNoteChange,
   onStateDone,
   onSkip,
+  missed,
+  onReopen,
+  onDismissMissed,
   onStartFresh,
   onGenerate,
 }: Props) {
@@ -243,6 +255,22 @@ export function ChatPage({
       </section>
 
       <div className="composer">
+        {/* 上一块收尾时还差着的要点：不自动补问，只提示一句，由用户决定。
+            点「接着补」会切回那一栏并重新打开这一块，模型下一轮就知道该问什么 */}
+        {missed && (
+          <div className="missed-hint" role="status">
+            <span className="missed-text">
+              「{dimensionLabel(missed.dim)}」这块还差 {missed.labels.length} 样没聊到：
+              {missed.labels.slice(0, 2).join('；')}
+            </span>
+            <button className="link-btn" type="button" onClick={onReopen}>
+              接着补
+            </button>
+            <button className="link-btn" type="button" onClick={onDismissMissed}>
+              算了
+            </button>
+          </div>
+        )}
         {active && !activeComplete && draft.length === 0 && sampleText && !busy && (
           <button className="sample-btn" type="button" onClick={() => setDraft(sampleText)}>
             ✎ 填入示例回答

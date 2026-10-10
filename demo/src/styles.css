@@ -1343,6 +1343,26 @@ body {
   background: #fff;
 }
 
+/* 上一块还差几个要点没聊到：一句提示 + 两个小按钮，不打断、不自动补问 */
+.missed-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg);
+}
+
+.missed-hint .missed-text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
 .state-card > .btn.primary {
   margin-top: 12px;
 }

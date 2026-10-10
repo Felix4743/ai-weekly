@@ -11,9 +11,9 @@ import {
   isBlockComplete,
   nextStage,
   nextStep,
-  nudgeBack,
   openBlock,
   planBlockEnd,
+  reopenBlock,
   setDepth,
   setStateDone,
 } from './core/interview'
@@ -103,6 +103,11 @@ export default function App() {
   const [stateScores, setStateScores] = useState<StateScores>({})
   /** 状态卡上那一行备注（旧档的四行文字也会并到这里） */
   const [stateNote, setStateNote] = useState('')
+  /**
+   * 上一次收尾时还差着的要点 —— 只在输入框上方给一条可点掉的提示，**不自动补问**
+   * （为什么：见 `handleSend` 里收尾对账那一段）。
+   */
+  const [missed, setMissed] = useState<{ dim: Dimension; labels: string[] } | null>(null)
 
   // 填了 Key 就是真模型，没填就用假 AI 走通流程
   const { client: ai, mode } = useMemo(
@@ -274,6 +279,7 @@ export default function App() {
       resultRef.current = null
       setResult(null)
       setRestored(false)
+      setMissed(null)
       // 这一轮从今天算起；上一份结果属于哪一周，到这里为止
       commitResultWeek(thisKey)
       setPage('chat')
@@ -365,6 +371,21 @@ export default function App() {
     [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
+  /**
+   * 用户点了提示里的「接着补」：切回那一栏、把这一块重新打开。
+   *
+   * 关键是**不替他念锚点**：块退回未完成之后，他打的下一句话会让模型拿到
+   * 正常的回合提示词 —— 里面摆着「这一块还没聊到的要点」，模型自己会接。
+   */
+  const handleReopen = useCallback(() => {
+    if (!missed || busyRef.current) return
+    commitInterview(reopenBlock(interviewRef.current, missed.dim))
+    setMissed(null)
+  }, [commitInterview, missed])
+
+  /** 用户点了「算了」：这条提示就过去，不再提 */
+  const handleDismissMissed = useCallback(() => setMissed(null), [])
+
   const handleSend = useCallback(
     async (raw: string) => {
       const dim = interviewRef.current.active
@@ -385,20 +406,16 @@ export default function App() {
         let advanced = nextStep(interviewRef.current, dim, turn.action, { covered: turn.covered })
 
         /**
-         * 模型说「这一块聊完了」时**不直接信**：先收尾对账，看还有哪个要点没聊到。
+         * 收尾对账：模型说「这一块聊完了」时**不直接信**，先看还差哪几个要点。
          *
-         * 模型报了覆盖也照样对账 —— 它可能漏报，也可能把没聊到的算成聊到了。
-         * 还差着就替它补问一句（`MAX_NUDGES` 次，之后放行）：宁可少聊一样，
-         * 也不要因为一次漏报就把这一块整个跳过去。
+         * 但 0.9.5 起**不自动替它补问**了 —— 真模型实测六个块里四个收尾时都缺要点，
+         * 而客户端补问只能念锚点原文（「有件本来想做的事，最后没动？卡在哪一步了？」），
+         * 那正是用户嫌「像念稿」的句子，一条条补上去机械感又回来了。
+         * 所以这里只记一笔，在输入框上方给一条可点掉的提示，由用户决定要不要回去补两句。
          */
         const plan = turn.action === 'block' ? planBlockEnd(advanced, dim) : null
-        if (plan?.nudge && plan.ask) {
-          advanced = nudgeBack(advanced, dim)
-          commitInterview(advanced)
-          // 补问用那个要点的锚点问法顶上 —— 不发请求，跟「这题跳过」是同一条路数
-          commitMessages([...messagesRef.current, aiMessage(spoken(plan.ask), dim)])
-          setError(null)
-          return
+        if (plan && plan.missing.length > 0) {
+          setMissed({ dim, labels: plan.missing.map((p) => p.intent) })
         }
 
         // 模型判定「这块聊够了」（[换块]）：顺手把流程里的下一块打开，别让他再点一次。
@@ -694,6 +711,9 @@ export default function App() {
           onNoteChange={handleNoteChange}
           onStateDone={handleStateDone}
           onSkip={handleSkip}
+          missed={missed}
+          onReopen={handleReopen}
+          onDismissMissed={handleDismissMissed}
           onStartFresh={handleStartFresh}
           onGenerate={handleGenerate}
         />

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { createInterview, finishAll, openBlock, setDepth, setStateDone } from '../core/interview'
 import { STATE_FIELDS } from '../core/stateFields'
-import type { ChatMessage, InterviewState, StateScores } from '../core/types'
+import type { ChatMessage, Dimension, InterviewState, StateScores } from '../core/types'
 import { ChatPage } from './ChatPage'
 
 /**
@@ -37,6 +37,7 @@ function render(options: {
   stateScores?: StateScores
   stateNote?: string
   busy?: boolean
+  missed?: { dim: Dimension; labels: string[] } | null
 }) {
   return renderToStaticMarkup(
     createElement(ChatPage, {
@@ -57,6 +58,9 @@ function render(options: {
       onNoteChange: () => {},
       onStateDone: () => {},
       onSkip: () => {},
+      missed: options.missed ?? null,
+      onReopen: () => {},
+      onDismissMissed: () => {},
       onStartFresh: () => {},
       onGenerate: () => {},
     }),
@@ -219,5 +223,45 @@ describe('采访页的「这题跳过」', () => {
     // 这一条是渲染层的保证 —— 按钮只是个 button，不会自己往 messages 里塞东西
     const html = render({ interview: IN_BLOCK, messages: CHAT })
     expect(html.match(/class="bubble"/g)).toHaveLength(CHAT.length)
+  })
+})
+
+/**
+ * 0.9.5 后半程：收尾时还差着要点，**不自动补问**，只在输入框上方提示一句。
+ *
+ * 为什么：真模型实测六个块里四个收尾时都缺要点，而客户端补问只能念锚点原文
+ * —— 那正是用户嫌「像念稿」的句子。改成让用户决定。
+ */
+describe('采访页的「这块还差几样」提示', () => {
+  const missed = { dim: 'event' as Dimension, labels: ['有没有一个当时拿不准的决定'] }
+
+  it('提示摆在输入框上方，写清是哪一块、还差几样', () => {
+    const html = render({ interview: IN_BLOCK, missed })
+    expect(html).toContain('class="missed-hint"')
+    expect(html).toContain('「事情」')
+    expect(html).toContain('还差 1 样没聊到')
+    expect(html).toContain('有没有一个当时拿不准的决定')
+    // 位置在 composer 里、输入框之前
+    expect(html.indexOf('missed-hint')).toBeLessThan(html.indexOf('<textarea'))
+  })
+
+  it('给两个出口：接着补 / 算了', () => {
+    const html = render({ interview: IN_BLOCK, missed })
+    expect(html).toContain('接着补')
+    expect(html).toContain('算了')
+  })
+
+  it('没有要补的时候整条不出现', () => {
+    expect(render({ interview: IN_BLOCK })).not.toContain('missed-hint')
+  })
+
+  it('要补的多于两条时只列前两条，不把提示撑成一长串', () => {
+    const html = render({
+      interview: IN_BLOCK,
+      missed: { dim: 'event', labels: ['要点一', '要点二', '要点三'] },
+    })
+    expect(html).toContain('还差 3 样没聊到')
+    expect(html).toContain('要点一；要点二')
+    expect(html).not.toContain('要点三')
   })
 })

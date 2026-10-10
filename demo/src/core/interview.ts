@@ -291,6 +291,18 @@ export function nudgeBack(s: InterviewState, dim: Dimension): InterviewState {
   }
 }
 
+/**
+ * 用户自己说要回去补两句：把那一块重新打开、切过去。
+ *
+ * 与 `nudgeBack` 的区别是**不算一次补问**（那次是客户端替模型补的，这次是用户点的）。
+ * 块被退回未完成之后，模型下一轮拿到的就是正常的回合提示词 —— 里面摆着
+ * 「这一块还没聊到的要点」，于是它会顺着接，而不是客户端念一句锚点。
+ */
+export function reopenBlock(s: InterviewState, dim: Dimension): InterviewState {
+  const p = blockProgress(s, dim)
+  return { ...openBlock(s, dim), blocks: { ...s.blocks, [dim]: { ...p, complete: false } } }
+}
+
 /** 这一块的主问题已经聊完，现在多说的每一句都算自由聊 */
 export function isFreeChat(s: InterviewState, dim: Dimension): boolean {
   return blockProgress(s, dim).complete
