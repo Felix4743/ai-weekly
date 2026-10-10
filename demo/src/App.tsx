@@ -5,7 +5,9 @@ import { createAiClient } from './core/createAiClient'
 import {
   coveragePercent,
   createInterview,
+  currentQuestionSpec,
   finishAll,
+  isBlockComplete,
   nextStage,
   nextStep,
   openBlock,
@@ -14,6 +16,7 @@ import {
 } from './core/interview'
 import { hasWeekContent, mergeWeekResult, recapLines } from './core/mergeWeek'
 import { sampleAnswer } from './core/mockAi'
+import { spoken } from './core/script'
 import { attachState, withScore } from './core/stateScore'
 import { stripMarkerForDisplay } from './core/turn'
 import {
@@ -457,6 +460,39 @@ export default function App() {
   }, [commitInterview])
 
   /**
+   * 「这题跳过」：用户提的「我有很多问题是没有感觉的，可以加个没有按键」。
+   *
+   * 点一下直接推进到下一题 —— **不发请求、也不在记录里留「跳过了」这种痕迹**。
+   * 状态机照常走一步（等价于模型给了 `[换题]`），所以每块的题目条数、追问计数、
+   * 覆盖率都不受影响。
+   *
+   * 但**下一题得亮出来**：不发请求就没有新文本，屏幕上会一直停着上一题，
+   * 点完看着像没反应。所以这里用客户端的那句参考问法（`spoken`）顶上 ——
+   * 跟「模型什么都没说」时的兜底是同一句，不是新造一套。
+   */
+  const handleSkip = useCallback(() => {
+    const dim = interviewRef.current.active
+    if (!dim || busyRef.current) return
+
+    const wasComplete = isBlockComplete(interviewRef.current, dim)
+    const advanced = nextStep(interviewRef.current, dim, 'next')
+    commitInterview(advanced)
+
+    // 主问题本来就问完了（自由聊）没什么可跳的
+    if (wasComplete) return
+
+    if (!isBlockComplete(advanced, dim)) {
+      const question = spoken(currentQuestionSpec(advanced, dim))
+      if (question) commitMessages([...messagesRef.current, aiMessage(question, dim)])
+      return
+    }
+
+    // 跳掉的正好是这一块最后一道：跟 [换块] 一样顺手把下一块打开，让它先开口
+    const stage = nextStage(advanced)
+    if (stage.kind === 'block' && stage.dim !== dim) void handleOpenBlock(stage.dim)
+  }, [commitInterview, commitMessages, handleOpenBlock])
+
+  /**
    * 用户在状态卡上点了星 / 写了备注。
    *
    * 改的是「这一轮采访」的那张卡；要是结果已经出来了（从结果页又退回采访接着聊），
@@ -634,6 +670,7 @@ export default function App() {
           onScoreState={handleScoreState}
           onNoteChange={handleNoteChange}
           onStateDone={handleStateDone}
+          onSkip={handleSkip}
           onStartFresh={handleStartFresh}
           onGenerate={handleGenerate}
         />

@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { createInterview, openBlock, setDepth, setStateDone } from '../core/interview'
+import { createInterview, finishAll, openBlock, setDepth, setStateDone } from '../core/interview'
 import { STATE_FIELDS } from '../core/stateFields'
 import type { ChatMessage, InterviewState, StateScores } from '../core/types'
 import { ChatPage } from './ChatPage'
@@ -56,6 +56,7 @@ function render(options: {
       onScoreState: () => {},
       onNoteChange: () => {},
       onStateDone: () => {},
+      onSkip: () => {},
       onStartFresh: () => {},
       onGenerate: () => {},
     }),
@@ -172,5 +173,51 @@ describe('采访页的状态追问', () => {
     const html = render({ interview: openBlock(ready({}), 'reconcile') })
     expect(html).not.toContain('状态追问')
     expect(html).toContain('上周对账')
+  })
+})
+
+/**
+ * 0.9.5：「这题跳过」。
+ *
+ * 用户的原话是「我有很多问题是没有感觉的，可以加个没有按键」——
+ * 点一下直接过，不发请求、也不在对话里留痕。
+ */
+describe('采访页的「这题跳过」', () => {
+  it('正在聊某一块、这题还没聊完时，按钮就在发送旁边', () => {
+    const html = render({ interview: IN_BLOCK })
+    expect(html).toContain('这题跳过')
+    // 跟「发送」同一排
+    const actions = html.slice(
+      html.indexOf('class="composer-actions"'),
+      html.indexOf('class="quick-jumps"'),
+    )
+    expect(actions).toContain('这题跳过')
+    expect(actions).toContain('发送')
+  })
+
+  it('状态卡还没交时不出现（那一屏没有题可跳）', () => {
+    expect(render({ interview: ON_CARD })).not.toContain('这题跳过')
+  })
+
+  it('定档那一步也不出现', () => {
+    expect(render({ interview: ON_DEPTH })).not.toContain('这题跳过')
+  })
+
+  it('主问题聊完了就不出现 —— 那时候是自由聊，没有题可跳', () => {
+    const done = finishAll(IN_BLOCK)
+    expect(render({ interview: done })).not.toContain('这题跳过')
+  })
+
+  it('AI 正在回复时按钮是灰的', () => {
+    const html = render({ interview: IN_BLOCK, busy: true })
+    const at = html.indexOf('这题跳过')
+    const button = html.slice(html.lastIndexOf('<button', at), at)
+    expect(button).toContain('disabled')
+  })
+
+  it('跳过的按钮不写进对话：它只推进状态，不产生气泡', () => {
+    // 这一条是渲染层的保证 —— 按钮只是个 button，不会自己往 messages 里塞东西
+    const html = render({ interview: IN_BLOCK, messages: CHAT })
+    expect(html.match(/class="bubble"/g)).toHaveLength(CHAT.length)
   })
 })

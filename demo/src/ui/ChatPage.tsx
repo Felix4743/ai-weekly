@@ -35,6 +35,8 @@ interface Props {
   onNoteChange: (text: string) => void
   /** 状态卡交上去了：接下来该定档 */
   onStateDone: () => void
+  /** 这题没什么可说的：直接推进到下一题（不调模型、不留痕迹） */
+  onSkip: () => void
   /** 从头再聊一遍（这周已记的不看、不并） */
   onStartFresh: () => void
   onGenerate: () => void
@@ -57,6 +59,7 @@ export function ChatPage({
   onScoreState,
   onNoteChange,
   onStateDone,
+  onSkip,
   onStartFresh,
   onGenerate,
 }: Props) {
@@ -277,6 +280,21 @@ export function ChatPage({
               onClick={submit}
             >
               发送
+            </button>
+          )}
+
+          {/* 这题没什么可说的就点它：直接过，不发请求、也不在记录里留痕。
+              只在「这题还没聊完」时出现 —— 主问题问完之后是自由聊，没有题可跳。
+              typing 时也灰掉：App 那边本来就挡着（busyRef），按钮看着能点却没反应最坑 */}
+          {active && !activeComplete && (
+            <button
+              className="btn subtle"
+              type="button"
+              disabled={busy || typing}
+              title="这题没什么可说的，直接问下一题"
+              onClick={onSkip}
+            >
+              这题跳过
             </button>
           )}
 

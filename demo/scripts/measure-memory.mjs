@@ -21,6 +21,8 @@ import electronPath from 'electron'
 
 const WALK_INDEX = process.argv.indexOf('--walk')
 const WALK = WALK_INDEX > -1 ? Number(process.argv[WALK_INDEX + 1] ?? 4) : 0
+const SKIP_INDEX = process.argv.indexOf('--skip')
+const SKIP = SKIP_INDEX > -1 ? Number(process.argv[SKIP_INDEX + 1] ?? 3) : 0
 const PORT = 9333
 const TIMEOUT_MS = 180_000
 
@@ -142,8 +144,26 @@ const PROBE = `
     label: document.querySelector('.stage-title')?.textContent ?? '',
     page: document.querySelector('.page')?.className ?? '(没有 .page)',
     starsOn: document.querySelectorAll('.star.on').length,
+    // 最后一条 AI 气泡 = 当前这道题；用来验证「跳过一下，题是不是真的换了一道」
+    question: (() => {
+      const bubbles = [...document.querySelectorAll('.bubble')]
+      const last = bubbles[bubbles.length - 1]
+      return last ? last.textContent.trim().slice(0, 28) : ''
+    })(),
   }
 `
+
+/** 点一下「这题跳过」（按文字找，免得为测试改组件里的 class） */
+async function skip(client) {
+  return evaluate(
+    client,
+    `const btn = [...document.querySelectorAll('.composer-actions .btn')]
+       .find((b) => b.textContent.trim() === '这题跳过')
+     if (!btn || btn.disabled) return false
+     btn.click()
+     return true`,
+  )
+}
 
 /** 等界面不忙了（没有打字/流式气泡、没有遮罩） */
 async function settle(client, timeoutMs = 20_000) {
@@ -227,15 +247,43 @@ async function main() {
     }
   }
 
+  /**
+   * `--skip N`：连点 N 次「这题跳过」，看题目是不是真的换了一道、有没有多出气泡。
+   *
+   * App 层没有单测（整份 App.tsx 没有测试），而「点一下是不是真的推进了」
+   * 正是这一版加的东西，所以拿真实界面验一次 —— 跟 smoke 的理由一样。
+   */
+  if (SKIP > 0) {
+    await click(client, '.state-card .star', 6) // 睡眠 2 星 → 让状态追问出现
+    await sleep(200)
+    await click(client, '.state-card .btn.primary')
+    await sleep(400)
+    await click(client, '.btn.depth', 1)
+    await settle(client)
+    await snap(client, '跳过之前')
+
+    for (let i = 1; i <= SKIP; i += 1) {
+      const ok = await skip(client)
+      if (!ok) {
+        process.stdout.write(`（第 ${i} 次没找到可点的「这题跳过」——可能正在等模型回话）\n`)
+        await settle(client)
+        continue
+      }
+      // 跳过一整块的最后一题会顺手打开下一块（那时会有一次 AI 开口），所以要等它安定
+      await settle(client)
+      await snap(client, `跳过第 ${i} 次之后`)
+    }
+  }
+
   process.stdout.write('\n')
   process.stdout.write(
-    `${'时点'.padEnd(24)} ${'JS 堆'.padStart(9)} ${'DOM 节点'.padStart(9)} ${'气泡'.padStart(6)} ${'亮星'.padStart(5)}  当前步骤\n`,
+    `${'时点'.padEnd(22)} ${'JS 堆'.padStart(9)} ${'DOM'.padStart(6)} ${'气泡'.padStart(5)} ${'亮星'.padStart(5)}  ${'当前步骤'.padEnd(10)} 当前这道题\n`,
   )
   for (const row of rows) {
     process.stdout.write(
-      `${String(row.时点).padEnd(24)} ${String(row.heapUsedMB + ' MB').padStart(9)} ` +
-        `${String(row.domNodes).padStart(9)} ${String(row.bubbles).padStart(6)} ` +
-        `${String(row.starsOn).padStart(5)}  ${row.label}\n`,
+      `${String(row.时点).padEnd(22)} ${String(row.heapUsedMB + ' MB').padStart(9)} ` +
+        `${String(row.domNodes).padStart(6)} ${String(row.bubbles).padStart(5)} ` +
+        `${String(row.starsOn).padStart(5)}  ${String(row.label).padEnd(10)} ${row.question}\n`,
     )
   }
   const first = rows[0]
