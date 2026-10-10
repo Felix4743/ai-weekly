@@ -22,6 +22,8 @@
     "measure:memory:walk": "npm run build && npm run build:electron && node scripts/measure-memory.mjs --walk 6",
     "verify:skip": "npm run build && npm run build:electron && node scripts/measure-memory.mjs --skip 3",
     "verify:result": "npm run build && npm run build:electron && node scripts/measure-memory.mjs --result",
+    "verify:installed": "node scripts/measure-memory.mjs --packaged --result",
+    "verify:installed:skip": "node scripts/measure-memory.mjs --packaged --skip 3",
     "try:model": "vitest run --config vitest.live.config.ts",
     "icon": "node scripts/make-icon.mjs",
     "test": "vitest run",

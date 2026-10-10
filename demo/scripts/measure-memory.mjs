@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import electronPath from 'electron'
@@ -14,9 +14,12 @@ import electronPath from 'electron'
  * 用法：
  *   node scripts/measure-memory.mjs              只量空闲（停在开场那张状态卡）
  *   node scripts/measure-memory.mjs --walk 6     再走几步：交卡 → 定档 → 发 6 轮回答
+ *   node scripts/measure-memory.mjs --skip 3     连点 3 次「这题跳过」，看题目是不是真的换了一道
+ *   node scripts/measure-memory.mjs --result     走完采访并生成结果，打印结果页区块顺序与页头概览
+ *   node scripts/measure-memory.mjs --packaged … 上面任一种都行，但拉的是装好的那一份
  *
  * 用的是一次性 userData（预置一份空 Key 的配置，好让它直接进采访页、走演示模式），
- * 所以不会碰到你真实的配置与会话。
+ * 所以不会碰到你真实的配置与会话 —— 验装机版时也一样。
  */
 
 const WALK_INDEX = process.argv.indexOf('--walk')
@@ -45,7 +48,39 @@ delete env.ELECTRON_RUN_AS_NODE
 env.AI_WEEKLY_USER_DATA = userData
 env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1'
 
-const child = spawn(electronPath, ['.', `--remote-debugging-port=${PORT}`], {
+/**
+ * `--packaged` 改成拉**装好的那一份**（`D:\AI周报\`）而不是源码。
+ *
+ * 与 `smoke.mjs` 的两种用法同理：「源码里跑得通」和「装出来那一份跑得通」是两件事。
+ * 装机目录在工作区外面，换过位置就设
+ * 环境变量 `AI_WEEKLY_INSTALL_DIR`。
+ */
+const PACKAGED = process.argv.includes('--packaged')
+const installDir = process.env.AI_WEEKLY_INSTALL_DIR ?? 'D:\\AI周报'
+
+/** 装机目录里那个应用程序本体：排除 NSIS 自带的 elevate.exe 与卸载器 */
+function findInstalledExe() {
+  try {
+    const exe = readdirSync(installDir).find(
+      (f) =>
+        f.toLowerCase().endsWith('.exe') &&
+        f.toLowerCase() !== 'elevate.exe' &&
+        !f.toLowerCase().startsWith('uninstall'),
+    )
+    return exe ? join(installDir, exe) : null
+  } catch {
+    return null
+  }
+}
+
+const command = PACKAGED ? findInstalledExe() : electronPath
+if (!command) {
+  process.stderr.write(`找不到装机版：${installDir}（先跑 npm run dist 并装上）\n`)
+  process.exit(1)
+}
+const launchArgs = PACKAGED ? [] : ['.']
+
+const child = spawn(command, [...launchArgs, `--remote-debugging-port=${PORT}`], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env,
 })
@@ -187,8 +222,27 @@ async function settle(client, timeoutMs = 20_000) {
   return false
 }
 
-/** 点一下 selector 选中的元素 */
-async function click(client, selector, index = 0) {
+/**
+ * 等 React 真的把页面挂上去。
+ *
+ * 打包版有时候比 CDP 的 target 出现得晚：target 有了、`#root` 还是空的，
+ * 这时候点星点不到任何东西 —— 表现是「分数没交上去，于是状态追问整步被跳过」，
+ * 看起来像功能坏了，其实只是脚本抢跑了。
+ */
+async function waitForApp(client, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const ready = await evaluate(
+      client,
+      `return Boolean(document.querySelector('.page') || document.querySelector('.setup-card'))`,
+    )
+    if (ready) return true
+    await sleep(200)
+  }
+  return false
+}
+
+/** 点一下 selector 选中的元素 */async function click(client, selector, index = 0) {
   return evaluate(
     client,
     `const els = [...document.querySelectorAll(${JSON.stringify(selector)})]
@@ -227,6 +281,7 @@ async function main() {
   const client = await connect(target.webSocketDebuggerUrl)
   ws = client.socket
   await client.send('Runtime.enable')
+  await waitForApp(client)
   await settle(client)
 
   await snap(client, '空闲（开场状态卡）')
