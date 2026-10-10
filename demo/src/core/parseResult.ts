@@ -68,16 +68,21 @@ const LEGACY_STATE_ROWS: { label: string; keys: string[] }[] = [
 ]
 
 /**
- * 状态那一栏：0.9.3 起只剩「四项分数 + 一行备注」。
+ * 状态那一栏：0.9.3 起是「四项分数 + 一行备注」，0.9.4 又多了「追问问出来的小结」。
  *
  * 容错口径和别处一致 —— 字段名各种叫法都认、缺项留空。
  * 分数只有 1–5 的整数才算数：模型自己编的分也认（读得回来），
  * 但生成与重新整理两步都会用界面上真实的点击把它盖掉。
  * 老的「四行文字」不会丢：并成备注，原话照抄。
+ *
+ * `digestRaw` 是**模型输出里的那一段**：`state` 不在结果 schema 里（分数不归模型管），
+ * 所以模型写的小结只能走顶层字段，到这儿再折进 `state.followUp`。
  */
-function toState(value: unknown): WeeklyState {
+function toState(value: unknown, digestRaw?: unknown): WeeklyState {
   const out = createEmptyState()
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return out
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return withDigest(out, digestRaw)
+  }
   const o = value as Record<string, unknown>
 
   const note = readString(o.note ?? o.备注 ?? o.说明 ?? '')
@@ -95,7 +100,16 @@ function toState(value: unknown): WeeklyState {
 
   const scores = coerceScores(o.scores ?? o.评分 ?? o.打分)
   if (hasAnyScore(scores)) out.scores = scores
-  return out
+
+  // 归档读回来时小结就在 state 里（`followUp`）；模型输出走顶层字段，由调用方传进来
+  return withDigest(out, digestRaw ?? o.followUp ?? o.追问 ?? o.状态小结)
+}
+
+/** 有小结才写这个键：空串不该在存档里留下一个空字段 */
+function withDigest(state: WeeklyState, raw: unknown): WeeklyState {
+  const text = readString(raw ?? '')
+  if (text) state.followUp = text
+  return state
 }
 
 /**
@@ -118,7 +132,8 @@ export function coerceResult(raw: unknown): WeeklyResult | null {
     nextFocus: toStringArray(o.nextFocus ?? o.下周重点),
     nextFollowUps: toStringArray(o.nextFollowUps ?? o.下周跟进),
     // 0.9.0 之前的档里没有 state：给空备注，不炸也不冒充有内容
-    state: toState(o.state ?? o.状态),
+    // 追问小结（0.9.4）写的时候是顶层字段，因为状态那一栏不由模型产出
+    state: toState(o.state ?? o.状态, o.stateFollowUp ?? o.stateDigest ?? o.状态小结),
   }
 }
 

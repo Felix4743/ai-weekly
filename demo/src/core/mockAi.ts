@@ -25,6 +25,7 @@ const GREETING = '周末好。我们花几分钟，把这一周过一遍。\n\n'
 
 /** 每个区块第一次被打开时的开场语 */
 const OPENERS: Record<Dimension, string> = {
+  probe: '先从你打的分说起。',
   reconcile: '对一下上周说好的。',
   event: '好，说说这周都忙了什么。',
   people: '再说说人。',
@@ -34,6 +35,12 @@ const OPENERS: Record<Dimension, string> = {
 
 /** 演示用：一键填入的示例回答，让 Demo 可以快速走完 */
 const SAMPLE_ANSWERS: Record<Dimension, string[]> = {
+  probe: [
+    '睡得太晚了，基本都刷手机刷到一点多；躺下也不容易睡着。',
+    '想运动，但每天回到家都快九点，实在挤不出来。',
+    '吃得比较凑合，中午基本都是外卖随便对付两口。',
+    '心情不太好，主要是方案一直卡着不动，心里悬着。',
+  ],
   reconcile: ['上周说好的报价发出去了，只发了初稿；要跟进的张总一直没约上。'],
   event: [
     '在改客户那个方案，改了三版了还没定下来。',
@@ -217,6 +224,18 @@ function buildFollowUps(result: WeeklyResult): string[] {
   if (result.people[0]) names.push(result.people[0].name)
   if (result.people[1]) names.push(result.people[1].name)
   return unique(names).slice(0, 2)
+}
+
+/**
+ * 状态追问聊出来的小结（0.9.4）。
+ *
+ * 假 AI 写不出真模型的归纳，就照实做一件事：把他在「状态追问」那一步说的话
+ * 收成短句拼起来。没聊到低分项时返回空对象 —— 不写这个键，跟真模型那边一致。
+ */
+function buildFollowUp(probeAnswers: string[]): { followUp?: string } {
+  const items = probeAnswers.filter((t) => !isNonAnswer(t)).map((t) => firstSentence(t, 40))
+  if (items.length === 0) return {}
+  return { followUp: unique(items).slice(0, 3).join('；') }
 }
 
 /** 从按区块分好的回答里，把人抽出来 */
@@ -411,6 +430,9 @@ export function createMockAi(options: MockAiOptions = {}): AiClient {
       result.highlights = buildHighlights(result, byDim)
       result.nextFocus = buildNextFocus(result)
       result.nextFollowUps = buildFollowUps(result)
+      // 低分项聊出来的小结（0.9.4）：假 AI 也得写上，否则演示模式下这一段永远看不到，
+      // 等于这条功能只在接了真模型时才存在
+      result.state = { ...result.state, ...buildFollowUp(byDim.probe) }
 
       return result
     },

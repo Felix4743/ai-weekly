@@ -24,6 +24,7 @@ import {
   CONTENT_BLOCKS,
   DEFAULT_FOLLOWUP_CAP,
   FOLLOWUP_CAPS,
+  PROBE_KEY,
   SCRIPT,
   TOTAL_MAIN_QUESTIONS,
   dimensionScript,
@@ -142,11 +143,17 @@ describe('分块采访状态机', () => {
     )
   })
 
-  it('每个内容块至少两道主问题，每个区块都有能念出来的追问', () => {
+  it('每个内容块至少两道主问题，除状态追问外每个区块都有能念出来的追问', () => {
     for (const d of CONTENT_BLOCKS) {
       expect(d.mainQuestions.length).toBeGreaterThanOrEqual(2)
     }
     for (const d of SCRIPT) {
+      // 状态追问的题目与追问池都按分数现算（probe.ts），这份静态表里当然是空的
+      if (d.key === PROBE_KEY) {
+        expect(d.mainQuestions).toEqual([])
+        expect(d.followUps).toEqual([])
+        continue
+      }
       expect(d.followUps.length).toBeGreaterThan(0)
       for (const spec of d.followUps) expect(spoken(spec).trim().length).toBeGreaterThan(0)
     }
@@ -262,11 +269,22 @@ describe('分块采访状态机', () => {
     let s = createInterview()
     const allAsked: string[] = []
     for (const d of SCRIPT) {
+      // 状态追问的题目按分数现算，没交卡（没有低分项）时它一道题都没有，
+      // 这一步「一个主问题都不漏」的口径只对写死题库的那些步骤有意义
+      if (d.key === PROBE_KEY) {
+        s = runBlock(s, d.key, 'next').state
+        expect(isBlockComplete(s, PROBE_KEY)).toBe(true)
+        continue
+      }
       const r = runBlock(s, d.key, 'next')
       allAsked.push(...r.asked)
       s = r.state
     }
-    expect(allAsked).toEqual(SCRIPT.flatMap((d) => d.mainQuestions).map(spoken))
+    expect(allAsked).toEqual(
+      SCRIPT.filter((d) => d.key !== PROBE_KEY)
+        .flatMap((d) => d.mainQuestions)
+        .map(spoken),
+    )
     // 四个内容块的题目正好是 TOTAL_MAIN_QUESTIONS，对账那一题不占进度
     expect(CONTENT_BLOCKS.flatMap((d) => d.mainQuestions)).toHaveLength(TOTAL_MAIN_QUESTIONS)
     expect(allAsked).toHaveLength(TOTAL_MAIN_QUESTIONS + 1)
@@ -355,5 +373,114 @@ describe('状态打分卡 · 不再是采访的一块', () => {
     expect(setStateDone(s)).toBe(s)
     expect(nextStage(s)).toEqual({ kind: 'depth' })
     expect(nextStage(setDepth(s, 'fast'))).toEqual({ kind: 'block', dim: 'reconcile' })
+  })
+})
+
+/**
+ * 0.9.4：打完分之后的「状态追问」。
+ *
+ * 这一步是用户提的第一个问题（「打完分之后就没后续了」）的解法：
+ * 问哪几项、问几道题，全看交卡那一刻的分 —— 所以它必须排在定档之后、内容块之前，
+ * 而且没有低分项时**整步跳过**，不能给用户一个空步骤。
+ */
+describe('状态追问 · 按打分决定问什么', () => {
+  /** 交卡 → 定档，走完流程的前两步 */
+  const ready = (scores: Record<string, number>) =>
+    setDepth(setStateDone(createInterview(), scores), 'mid')
+
+  it('交卡时把低分项定下来（≤ 2 星）', () => {
+    const s = setStateDone(createInterview(), { mood: 4, sleep: 2, sport: 1, diet: 5 })
+    expect(s.lowKeys).toEqual(['sleep', 'sport'])
+  })
+
+  it('有低分项：定档之后先问状态，再问上周对账', () => {
+    const s = ready({ sleep: 2, sport: 1 })
+    expect(nextStage(s)).toEqual({ kind: 'block', dim: 'probe' })
+  })
+
+  it('四项都还行：这一步整步跳过，直接进上周对账', () => {
+    const s = ready({ mood: 4, sleep: 5, sport: 3, diet: 4 })
+    expect(s.lowKeys).toEqual([])
+    expect(isBlockComplete(s, 'probe')).toBe(true)
+    expect(nextStage(s)).toEqual({ kind: 'block', dim: 'reconcile' })
+  })
+
+  it('一项都没打分：也跳过（「没打分」不等于「过得不好」）', () => {
+    const s = ready({})
+    expect(s.lowKeys).toEqual([])
+    expect(nextStage(s)).toEqual({ kind: 'block', dim: 'reconcile' })
+  })
+
+  it('两项低就有两道题，一道一道问，问完这一步才算完', () => {
+    let s = ready({ sleep: 2, sport: 1 })
+    s = openBlock(s, 'probe')
+
+    const first = currentQuestionSpec(s, 'probe')
+    expect(first?.intent).toContain('睡眠')
+
+    // 换题 → 轮到第二项
+    s = nextStep(s, 'probe', 'next')
+    expect(blockProgress(s, 'probe').askIndex).toBe(1)
+    expect(currentQuestionSpec(s, 'probe')?.intent).toContain('运动')
+    expect(isBlockComplete(s, 'probe')).toBe(false)
+
+    // 再换一次 → 两项都问过，这一步收尾
+    s = nextStep(s, 'probe', 'next')
+    expect(isBlockComplete(s, 'probe')).toBe(true)
+  })
+
+  it('每一项各有各的追问额度：换了项就重新数', () => {
+    let s = openBlock(ready({ sleep: 2, sport: 2 }), 'probe')
+    s = nextStep(s, 'probe', 'followup')
+    expect(blockProgress(s, 'probe').followUpCount).toBe(1)
+
+    s = nextStep(s, 'probe', 'next')
+    expect(blockProgress(s, 'probe').followUpCount).toBe(0)
+    expect(blockProgress(s, 'probe').askIndex).toBe(1)
+  })
+
+  it('追问次数到顶就该换项了 —— 上限还是跟着档位走', () => {
+    const fast = setDepth(setStateDone(createInterview(), { sleep: 1, sport: 1 }), 'fast')
+    let s = openBlock(fast, 'probe')
+    expect(currentFollowUpCap(s)).toBe(FOLLOWUP_CAPS.fast)
+
+    s = nextStep(s, 'probe', 'followup')
+    expect(blockProgress(s, 'probe').followUpCount).toBe(1)
+    // 到顶了：再要追问也只能换项
+    s = nextStep(s, 'probe', 'followup')
+    expect(blockProgress(s, 'probe').askIndex).toBe(1)
+  })
+
+  it('[换块] 让这一步立刻收尾，不用把剩下的项走完', () => {
+    let s = openBlock(ready({ sleep: 1, sport: 1, mood: 1 }), 'probe')
+    s = nextStep(s, 'probe', 'block')
+    expect(isBlockComplete(s, 'probe')).toBe(true)
+    expect(nextStage(s)).toEqual({ kind: 'block', dim: 'reconcile' })
+  })
+
+  it('状态追问不占覆盖率 —— 它是流程里的一步，不是内容块', () => {
+    let s = openBlock(ready({ sleep: 1, sport: 1 }), 'probe')
+    expect(coveragePercent(s)).toBe(0)
+    s = nextStep(s, 'probe', 'next')
+    s = nextStep(s, 'probe', 'next')
+    expect(isBlockComplete(s, 'probe')).toBe(true)
+    expect(coveragePercent(s)).toBe(0)
+  })
+
+  it('全新一场采访里它还没到：先要卡、再定档，才轮到它', () => {
+    expect(nextStage(createInterview())).toEqual({ kind: 'state' })
+    expect(nextStage(setDepth(createInterview(), 'mid'))).toEqual({ kind: 'state' })
+    expect(nextStage(setStateDone(createInterview(), { sleep: 1 }))).toEqual({ kind: 'depth' })
+  })
+
+  it('残缺状态里没有 lowKeys 也不炸（归档翻出来的老状态就是没有这个键）', () => {
+    const wild = {
+      active: null,
+      blocks: {},
+      stateDone: true,
+      depth: 'mid',
+    } as unknown as InterviewState
+    expect(() => nextStage(wild)).not.toThrow()
+    expect(nextStage(wild)).toEqual({ kind: 'block', dim: 'reconcile' })
   })
 })

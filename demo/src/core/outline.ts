@@ -58,12 +58,14 @@ export function countSection(result: WeeklyResult, key: SectionKey): number {
       return result.things.length
     case 'pending':
       return result.pending.length
-    // 状态：点了几项分算几条，写了备注再加一条。
+    // 状态：点了几项分算几条，写了备注或有一段追问小结再加一条。
     // 用 coerceScore 判分而不是 typeof === 'number' —— 界面上的星只认 1–5，
     // 脏值（0 / 6 / 小数）界面上是「未打分」，目录也不该算它一条。
     case 'state':
-      return STATE_KEYS.filter((key) => coerceScore(result.state.scores?.[key]) !== undefined).length +
-        (result.state.note.trim() ? 1 : 0)
+      return (
+        STATE_KEYS.filter((key) => coerceScore(result.state.scores?.[key]) !== undefined).length +
+        (result.state.note.trim() || (result.state.followUp ?? '').trim() ? 1 : 0)
+      )
     case 'growth':
       return result.growth.length
     case 'highlights':

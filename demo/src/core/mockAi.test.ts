@@ -43,7 +43,14 @@ function withBlocks(
     const key = dim as Dimension
     if (part) blocks[key] = { ...blocks[key], ...part }
   }
-  return { active: null, blocks, stateDone: options.stateDone ?? true, depth: options.depth ?? null }
+  return {
+    active: null,
+    blocks,
+    stateDone: options.stateDone ?? true,
+    // 这些用例不碰「状态追问」，所以当它没有低分项（等于这一步不存在）
+    lowKeys: [],
+    depth: options.depth ?? null,
+  }
 }
 
 /** 四个内容块一个一个聊过来的历史（对账放最后，跟 SCRIPT 顺序一致） */
@@ -436,5 +443,47 @@ describe('演示用假 AI · 用户补充后重新整理', () => {
     const once = await ai.refine(FULL_HISTORY, initial, '下周要跟赵总确认一下预算。')
     const twice = await ai.refine(FULL_HISTORY, once, '下周要跟赵总确认一下预算。')
     expect(twice.people.filter((p) => p.name === '赵总')).toHaveLength(1)
+  })
+})
+
+/**
+ * 0.9.4 的「状态追问」在演示模式里也要走通。
+ *
+ * 不填 API Key 时用的是假 AI —— 如果它不认这一步，用户没配 Key 就看不到新功能，
+ * 等于这条功能只在接了真模型时才存在。
+ */
+describe('演示用假 AI · 状态追问', () => {
+  it('每一步都能念出一句示例回答，状态追问也不例外', () => {
+    const text = sampleAnswer('probe', 0)
+    expect(text.trim().length).toBeGreaterThan(0)
+    expect(text).toContain('睡')
+  })
+
+  it('追问聊出来的话会写进状态的追问小结里', async () => {
+    const history = [
+      ...FULL_HISTORY,
+      msg('ai', '睡眠不好是为什么？', 'probe'),
+      msg('user', '睡得太晚了，基本都刷手机刷到一点多。', 'probe'),
+      msg('user', '想运动，但每天回到家都快九点，实在挤不出来。', 'probe'),
+    ]
+    const result = await ai.summarize(history)
+    expect(result.state.followUp).toBeTruthy()
+    expect(result.state.followUp).toContain('睡得太晚')
+    expect(result.state.followUp).toContain('挤不出来')
+  })
+
+  it('没聊到低分项时不写这个键 —— 跟真模型那边同一种形状', async () => {
+    const result = await ai.summarize(FULL_HISTORY)
+    expect('followUp' in result.state).toBe(false)
+  })
+
+  it('「没有」这类回答不进小结（不算内容）', async () => {
+    const history = [
+      ...FULL_HISTORY,
+      msg('ai', '睡眠不好是为什么？', 'probe'),
+      msg('user', '没有', 'probe'),
+    ]
+    const result = await ai.summarize(history)
+    expect('followUp' in result.state).toBe(false)
   })
 })

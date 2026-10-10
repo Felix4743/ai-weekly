@@ -154,3 +154,50 @@ describe('模型结果解析', () => {
     expect(good.result.growth).toEqual(GOOD.growth)
   })
 })
+
+/**
+ * 0.9.4：低分项的追问小结。
+ *
+ * 它走的是**顶层字段** `stateFollowUp`，因为 `state` 整块不在结果 schema 里
+ * （分数不归模型管）。读回来时折进 `state.followUp`。
+ */
+describe('结果解析 · 状态追问小结', () => {
+  it('模型写在顶层的 stateFollowUp 会被收进 state.followUp', () => {
+    const result = parseResult(
+      JSON.stringify({ ...GOOD, stateFollowUp: '睡眠：躺下停不下来，一般一点多才睡' }),
+    )
+    expect(result.state.followUp).toBe('睡眠：躺下停不下来，一般一点多才睡')
+    // 分数依然不由模型产出：它没编，读回来就没有
+    expect(result.state.scores).toBeUndefined()
+  })
+
+  it('中文键名也认（模型偶尔会用中文）', () => {
+    const result = parseResult(JSON.stringify({ ...GOOD, 状态小结: '运动挤不出时间' }))
+    expect(result.state.followUp).toBe('运动挤不出时间')
+  })
+
+  it('归档里读回来时小结在 state 里面（那是我们自己写出去的形状）', () => {
+    const result = parseResult(
+      JSON.stringify({
+        ...GOOD,
+        state: { note: '还行', followUp: '睡眠：刷手机刷太晚', scores: { sleep: 2 } },
+      }),
+    )
+    expect(result.state.followUp).toBe('睡眠：刷手机刷太晚')
+    expect(result.state.note).toBe('还行')
+    expect(result.state.scores).toEqual({ sleep: 2 })
+  })
+
+  it('没有这一段就不写这个键，老档读回来也不会凭空多出来', () => {
+    expect('followUp' in parseResult(JSON.stringify(GOOD)).state).toBe(false)
+    expect('followUp' in parseResult(JSON.stringify({ ...GOOD, stateFollowUp: '   ' })).state).toBe(
+      false,
+    )
+  })
+
+  it('state 整块缺失（0.9.0 之前的老档）也能收下小结，不炸', () => {
+    const result = parseResult(JSON.stringify({ events: ['改方案'], stateFollowUp: '小结' }))
+    expect(result.state.note).toBe('')
+    expect(result.state.followUp).toBe('小结')
+  })
+})

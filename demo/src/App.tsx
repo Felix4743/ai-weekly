@@ -178,7 +178,10 @@ export default function App() {
       commitScores(scores)
       commitStateNote(note)
       const current = resultRef.current
-      if (current) commitResult({ ...current, state: attachState(scores, note) })
+      // 追问小结要原样带过去：改个分数不该把聊出来的那一段抹掉
+      if (current) {
+        commitResult({ ...current, state: attachState(scores, note, current.state.followUp) })
+      }
     },
     [commitResult, commitScores, commitStateNote],
   )
@@ -194,7 +197,8 @@ export default function App() {
   const interviewContext = useCallback((): InterviewContext => {
     const thisKey = weekKeyOf(new Date())
     const lastKey = addWeeks(thisKey, -1)
-    const ctx: InterviewContext = {}
+    // 打分卡上点的分要发给模型 —— 「状态追问」那一步问的就是它（模型只读、不产分）
+    const ctx: InterviewContext = { stateScores: stateScoresRef.current }
 
     const last = archiveRef.current.find((e) => e.week === lastKey)
     if (last) {
@@ -299,10 +303,15 @@ export default function App() {
         ? (archiveRef.current.find((e) => e.week === week)?.result ?? null)
         : null
       const merged = mergeWeekResult(r, previous)
-      // 分数与备注以界面上真实的点击 / 手写为准：模型压根不产这一项，它自己编的也在这儿被盖掉
+      // 分数与备注以界面上真实的点击 / 手写为准：模型压根不产这一项，它自己编的也在这儿被盖掉。
+      // 唯一的例外是追问小结 —— 那是模型据追问对话写的，不是分，所以由它带过来。
       const withState: WeeklyResult = {
         ...merged,
-        state: attachState(stateScoresRef.current, stateNoteRef.current),
+        state: attachState(
+          stateScoresRef.current,
+          stateNoteRef.current,
+          merged.state.followUp,
+        ),
       }
       // 生成的那一刻定下它属于哪一周 —— 之后再编辑、重新整理都跟着这一周走
       commitResultWeek(week)
@@ -437,10 +446,14 @@ export default function App() {
     [ai, commitInterview, commitMessages, interviewContext, pushDelta, resetStream],
   )
 
-  /** 用户交了状态卡：流程走到「定档」，接下来交给他点按钮 */
+  /**
+   * 用户交了状态卡：流程走到「定档」，接下来交给他点按钮。
+   *
+   * 分数要一起交进去 —— 「状态追问」问哪几项、问几道题，全看交卡这一刻的分。
+   */
   const handleStateDone = useCallback(() => {
     if (busyRef.current) return
-    commitInterview(setStateDone(interviewRef.current))
+    commitInterview(setStateDone(interviewRef.current, stateScoresRef.current))
   }, [commitInterview])
 
   /**

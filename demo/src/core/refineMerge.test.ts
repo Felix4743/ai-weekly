@@ -136,4 +136,29 @@ describe('重新整理的结果合并', () => {
     expect(merged.nextFocus).toEqual([])
     expect(merged.nextFollowUps).toEqual([])
   })
+
+  /**
+   * 0.9.4：状态那一栏多了「追问小结」。
+   *
+   * 这一条是**踩过的那类坑的第二次**：`attachState` 只认传进去的几样，
+   * 少传一个就等于把那一段抹掉 —— 而「重新整理」一次就发生。
+   */
+  it('追问小结不会被重新整理洗掉', () => {
+    const current = result({
+      state: attachState({ sleep: 2 }, '这周还行', '睡眠：躺下停不下来'),
+    })
+    const merged = mergeRefined(current, result({ highlights: ['模型给的新主线'] }))
+    expect(merged.state.followUp).toBe('睡眠：躺下停不下来')
+    expect(merged.state.note).toBe('这周还行')
+    expect(merged.state.scores).toEqual({ sleep: 2 })
+  })
+
+  it('模型就算自己编了 stateFollowUp 也不算数 —— 状态整组以用户那边为准', () => {
+    const current = result({ state: attachState({ mood: 4 }, '我写的', '我聊出来的小结') })
+    const fromModel = result({
+      state: attachState({ mood: 1 }, '模型编的备注', '模型编的小结'),
+    })
+    const merged = mergeRefined(current, fromModel)
+    expect(merged.state).toEqual(attachState({ mood: 4 }, '我写的', '我聊出来的小结'))
+  })
 })

@@ -62,6 +62,13 @@ export function resultToMarkdown(r: WeeklyResult): string {
     lines.push('')
     lines.push(`> ${st.note.trim()}`)
   }
+  // 低分项聊出来的小结（0.9.4）：跟备注挨着放，但明说是追问来的，
+  // 免得粘到别处之后它跟用户自己写的那句混成一句
+  const followUp = (st.followUp ?? '').trim()
+  if (followUp) {
+    lines.push('')
+    lines.push(`> **追问**：${followUp}`)
+  }
   lines.push('')
 
   lines.push('## 本周主线', '')

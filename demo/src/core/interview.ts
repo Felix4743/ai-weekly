@@ -1,17 +1,20 @@
 import {
   CONTENT_BLOCKS,
+  PROBE_KEY,
   SCRIPT,
   TOTAL_MAIN_QUESTIONS,
   dimensionScript,
   followUpCap,
   type QuestionSpec,
 } from './script'
+import { lowScoreKeys, probeQuestions } from './probe'
 import type {
   BlockProgress,
   BlockProgressMap,
   Depth,
   Dimension,
   InterviewState,
+  StateScores,
   TurnAction,
 } from './types'
 
@@ -38,7 +41,8 @@ export function createInterview(options: CreateInterviewOptions = {}): Interview
   if (!hasLastWeek) {
     blocks.reconcile = { ...EMPTY_PROGRESS, complete: true }
   }
-  return { active: null, blocks, stateDone: false, depth: null }
+  // probe 要不要跳过，得等卡交上来才知道（分数那时才有），所以创建时一律是「没问过」
+  return { active: null, blocks, stateDone: false, lowKeys: [], depth: null }
 }
 
 export function blockProgress(s: InterviewState, dim: Dimension): BlockProgress {
@@ -52,24 +56,57 @@ export function openBlock(s: InterviewState, dim: Dimension): InterviewState {
   return { ...s, active: dim }
 }
 
-/** 开场那张状态打分卡交上来了（四项点完星、点了开始） */
-export function setStateDone(s: InterviewState): InterviewState {
-  if (s.stateDone) return s
-  return { ...s, stateDone: true }
+/**
+ * 开场那张状态打分卡交上来了（四项点完星、点了开始）。
+ *
+ * 交卡这一刻顺带**定下低分项**（≤ 2 星）——`probe` 那一步问的就是这几项，
+ * 问几道题、什么时候跳过都由它决定，所以必须在这里落定，而不是每次现算。
+ * 一项都不低（或者他压根没打分）就把这一步直接标成已过：用户看不到空的一步。
+ */
+export function setStateDone(
+  s: InterviewState,
+  scores: StateScores | undefined = {},
+): InterviewState {
+  const lowKeys = lowScoreKeys(scores)
+  const current = s.lowKeys ?? []
+  const sameKeys = current.length === lowKeys.length && current.every((key, i) => key === lowKeys[i])
+  // 重复交卡不该白改一次状态（界面照旧、引用也别换）
+  if (s.stateDone && sameKeys) return s
+
+  const blocks =
+    lowKeys.length > 0
+      ? s.blocks
+      : { ...s.blocks, [PROBE_KEY]: { ...blockProgress(s, PROBE_KEY), complete: true } }
+  return { ...s, stateDone: true, lowKeys, blocks }
 }
 
 /* ---------------- 当前该问什么 ---------------- */
 
+/**
+ * 这一步的主问题清单。
+ *
+ * 只有 `probe` 是现算的 —— 问几道题取决于他给自己打的分（见 `probe.ts`），
+ * 别的步骤都是写死的。`currentQuestionSpec` / `nextStep` / `answeredInBlock`
+ * 全部走这一个入口，免得出现「状态机按写死的清单推进、提示词按分数提问」
+ * 这种两边对不上的情况。
+ */
+export function mainQuestionsFor(s: InterviewState, dim: Dimension): QuestionSpec[] {
+  // `?? []` 不是多余的：手工拼的残缺状态（比如归档里翻出来的）可能根本没有这个键，
+  // 而这里被 nextStage 每走一步都要问一次，抛错就等于整个流程打不开
+  if (dim === PROBE_KEY) return probeQuestions(s.lowKeys ?? [])
+  return dimensionScript(dim)?.mainQuestions ?? []
+}
+
 export function currentQuestionSpec(s: InterviewState, dim: Dimension): QuestionSpec | undefined {
-  const script = dimensionScript(dim)
-  if (!script) return undefined
+  const list = mainQuestionsFor(s, dim)
+  if (list.length === 0) return undefined
   const p = blockProgress(s, dim)
-  return script.mainQuestions[Math.min(p.askIndex, script.mainQuestions.length - 1)]
+  return list[Math.min(p.askIndex, list.length - 1)]
 }
 
 export function currentFollowUpSpec(s: InterviewState, dim: Dimension): QuestionSpec | undefined {
   const script = dimensionScript(dim)
-  if (!script) return undefined
+  if (!script || script.followUps.length === 0) return undefined
   const p = blockProgress(s, dim)
   return script.followUps[p.followUpCount % script.followUps.length]
 }
@@ -110,10 +147,16 @@ export function nextStep(
   dim: Dimension,
   action: TurnAction,
 ): InterviewState {
-  const script = dimensionScript(dim)
-  if (!script) return s
-
+  const questions = mainQuestionsFor(s, dim)
   const p = blockProgress(s, dim)
+
+  // 没有题目可问（状态追问没挑出低分项时就是这样）：直接算这一步过。
+  // 不能原样返回 —— 那样这一步永远完不成，流程会卡在一个空的步骤上。
+  // 未知区块例外：那种情况连题目都构造不出来，原样返回、别凭空虚造一个进度项。
+  if (questions.length === 0) {
+    if (!dimensionScript(dim) || p.complete) return s
+    return { ...s, blocks: { ...s.blocks, [dim]: { ...p, complete: true } } }
+  }
 
   /**
    * 主问题已经问完，用户还在说。
@@ -145,7 +188,7 @@ export function nextStep(
   }
 
   const nextAsk = p.askIndex + 1
-  if (nextAsk < script.mainQuestions.length) {
+  if (nextAsk < questions.length) {
     return {
       ...s,
       blocks: {
@@ -171,7 +214,7 @@ export function isFreeChat(s: InterviewState, dim: Dimension): boolean {
 export function finishAll(s: InterviewState): InterviewState {
   const blocks = {} as BlockProgressMap
   for (const d of SCRIPT) blocks[d.key] = { ...blockProgress(s, d.key), complete: true }
-  return { active: s.active, blocks, stateDone: true, depth: s.depth }
+  return { active: s.active, blocks, stateDone: true, lowKeys: s.lowKeys, depth: s.depth }
 }
 
 /* ---------------- 流程走到哪儿了 ---------------- */
@@ -196,7 +239,11 @@ export function nextStage(s: InterviewState): Stage {
   if (s.depth === null) return { kind: 'depth' }
 
   for (const d of SCRIPT) {
-    if (!blockProgress(s, d.key).complete) return { kind: 'block', dim: d.key }
+    if (blockProgress(s, d.key).complete) continue
+    // 没有题目的步骤直接跳过：状态追问没挑出低分项时它就是空的一步，
+    // 不该在流程里露出来（谁拼的状态都一样 —— 不指望调用方先把 complete 标好）
+    if (mainQuestionsFor(s, d.key).length === 0) continue
+    return { kind: 'block', dim: d.key }
   }
   return { kind: 'done' }
 }
@@ -213,11 +260,10 @@ export function isAllComplete(s: InterviewState): boolean {
 
 /** 该区块已经回答过几个主问题 */
 export function answeredInBlock(s: InterviewState, dim: Dimension): number {
-  const script = dimensionScript(dim)
-  if (!script) return 0
+  const list = mainQuestionsFor(s, dim)
   const p = blockProgress(s, dim)
-  if (p.complete) return script.mainQuestions.length
-  return Math.min(p.askIndex, script.mainQuestions.length)
+  if (p.complete) return list.length
+  return Math.min(p.askIndex, list.length)
 }
 
 /** 该区块一共有几个主问题 */

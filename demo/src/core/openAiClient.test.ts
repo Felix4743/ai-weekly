@@ -63,6 +63,7 @@ function withFollowUps(count: number, depth: Depth | null = null): InterviewStat
     },
     // 状态卡与档位都已经过去了，这里只测区块内的一轮
     stateDone: true,
+    lowKeys: [],
     depth,
   }
 }
@@ -80,6 +81,7 @@ function inFreeChat(freeTurns = 1, followUpCount = FOLLOWUP_CAPS.deep): Intervie
       event: { ...base.blocks.event, complete: true, freeTurns, followUpCount },
     },
     stateDone: true,
+    lowKeys: [],
     depth: 'deep',
   }
 }

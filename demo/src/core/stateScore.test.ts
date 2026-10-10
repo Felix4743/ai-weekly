@@ -135,3 +135,47 @@ describe('状态评分 · 界面文案', () => {
     )
   })
 })
+
+/**
+ * 0.9.4：状态那一栏多了「追问小结」（低分项聊出来的那一段）。
+ *
+ * 它跟备注是**两个字段**：备注是用户自己写的字，小结是模型据追问写的。
+ * 混成一个字段的话，「接着补」的第二轮会把上一轮的小结原样再抄一遍。
+ */
+describe('状态 · 追问小结', () => {
+  it('给了小结就写进 followUp，跟备注并存', () => {
+    expect(attachState({ sleep: 2 }, '这周还行', '睡眠：躺下睡不着')).toEqual({
+      scores: { sleep: 2 },
+      note: '这周还行',
+      followUp: '睡眠：躺下睡不着',
+    })
+  })
+
+  it('没有小结就不写这个键 —— 空串不该在存档里留一个空字段', () => {
+    expect(attachState({ sleep: 2 }, '这周还行')).toEqual({
+      scores: { sleep: 2 },
+      note: '这周还行',
+    })
+    expect('followUp' in attachState(undefined, '只有备注', '   ')).toBe(false)
+  })
+
+  it('只有小结、没有备注和分数也算一份状态（一项都没点就不写 scores）', () => {
+    const state = attachState(undefined, '', '运动：回到家太晚，挤不出时间')
+    expect(state.followUp).toBe('运动：回到家太晚，挤不出时间')
+    expect(state.note).toBe('')
+    expect('scores' in state).toBe(false)
+  })
+
+  it('小结前后的空白会被剪掉', () => {
+    expect(attachState(undefined, '', '  睡眠不好是因为刷手机  ').followUp).toBe(
+      '睡眠不好是因为刷手机',
+    )
+  })
+
+  it('不传小结就等于清掉它 —— 所以每个「只改别处」的调用都得把它带回来', () => {
+    const before = attachState({ mood: 3 }, '备注', '小结')
+    expect(before.followUp).toBe('小结')
+    // 改分数时如果忘了带上 followUp，这一段就没了（refineMerge / ResultBody 都靠这条约定）
+    expect(attachState(before.scores, before.note).followUp).toBeUndefined()
+  })
+})

@@ -49,16 +49,24 @@ export function withScore(
 }
 
 /**
- * 把「界面上的分数」与备注拼成一份状态（0.9.3 起状态就是「四项分数 + 一行备注」）。
+ * 把「界面上的分数」与备注拼成一份状态（0.9.4 起还能带一段追问小结）。
  *
  * 给的分数与备注就是全部：旧状态不参与合并，省得模型编的分数、上一版留下的
  * 文字从缝里钻回来。一项都没点就**不写 `scores` 键** —— 否则 `{scores:{}}`
  * 会进归档，以后再读回来还得分「空对象」和「没有」两种情况。
+ *
+ * `followUp` 是低分项聊出来的小结（模型写的），**默认空**：不传就等于把它清掉，
+ * 所以「改分数 / 改备注」那两处调用必须把原来的 `followUp` 一起传回来。
  */
-export function attachState(scores: StateScores | undefined, note: string): WeeklyState {
+export function attachState(
+  scores: StateScores | undefined,
+  note: string,
+  followUp = '',
+): WeeklyState {
   const clean = coerceScores(scores)
-  const trimmed = note.trim()
-  const next: WeeklyState = { note: trimmed }
+  const next: WeeklyState = { note: note.trim() }
+  const digest = followUp.trim()
+  if (digest) next.followUp = digest
   return hasAnyScore(clean) ? { ...next, scores: clean } : next
 }
 

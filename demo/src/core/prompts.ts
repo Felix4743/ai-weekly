@@ -6,13 +6,17 @@ import {
   nextStep,
 } from './interview'
 import { buildInterviewerSystem } from './persona'
+import { LOW_SCORE_MAX, lowScoreItems, scoresLine } from './probe'
 import {
   CONTENT_BLOCKS,
+  PROBE_KEY,
+  RECONCILE_KEY,
   SCRIPT,
   depthSpec,
   dimensionScript,
   followUpCap,
 } from './script'
+import { SCORE_MAX } from './stateScore'
 import type {
   ChatMessage,
   Dimension,
@@ -67,6 +71,17 @@ export function formatProgress(state: InterviewState): string {
   })
   const reconcile = blockProgress(state, 'reconcile')
   parts.push(`上周对账（${reconcile.complete ? '已过' : '还没问'}）`)
+
+  // 状态追问在最前面，而且只在真有低分项时才提它 —— 没有低分项这一步压根不存在
+  const probe = blockProgress(state, PROBE_KEY)
+  const lowCount = (state.lowKeys ?? []).length
+  if (lowCount > 0) {
+    const n = lowCount
+    parts.unshift(
+      `状态追问（${probe.complete ? '已问完' : `问到第 ${Math.min(probe.askIndex + 1, n)}/${n} 项`}）`,
+    )
+  }
+
   return `${parts.join('，')}；档位：${depthLabel(state)}`
 }
 
@@ -108,6 +123,34 @@ function lastWeekBlock(ctx: InterviewContext): string {
   const lines = [`${when}他自己定下来的是：`, `下周重点：${focus.join(' / ') || '（没写）'}`]
   if (followUps.length > 0) lines.push(`要跟进的人：${followUps.join(' / ')}`)
   return lines.join('\n')
+}
+
+/**
+ * 状态追问那一步：把「他打了几分」和「低分那几项要问到什么」交给模型。
+ *
+ * 这一步是 0.9.4 加的，起因是用户那句「打完分之后就没后续了」。
+ *
+ * **它推翻了 0.9.3 的一条约定**：那时提示词里连 `scores` 这个词都没有，分数刻意不给模型看。
+ * 现在必须给 —— 不问分数就问不出「睡眠 2/5 是为什么」。边界没变：
+ * 分仍然只由界面写，模型写不了它（生成与重新整理都会用界面上的真实点击盖掉）。
+ */
+function probeBlock(ctx: InterviewContext): string {
+  const items = lowScoreItems(ctx.stateScores)
+  if (items.length === 0) return ''
+  const line = scoresLine(ctx.stateScores, SCORE_MAX)
+  return [
+    line ? `他给自己打的分：${line}。` : '',
+    `其中 ${items.length} 项偏低（≤ ${LOW_SCORE_MAX}/5），这一轮要把它们**逐项**问到：`,
+    ...items.map(
+      (item, i) =>
+        `${i + 1}. ${item.label}（${item.score}/${SCORE_MAX}）—— 要问到：${item.intent}` +
+        `（示例：「${item.examples.join('」「')}」，只是意思，用你自己的话问）`,
+    ),
+    '一次只问一项：这一项问清了再问下一项，全部问完才用 [换块]。',
+    '分寸：不要评判他为什么没做到，也别急着给方案；只帮他把「是什么挡着、能不能挪开」看清楚。',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 /**
@@ -154,7 +197,10 @@ export function buildOpeningPrompt(
 
   const head = [`现在要开始聊「${script.label}」这一块。这一块关心的是：${script.hint}。`]
 
-  if (dim === 'reconcile') {
+  if (dim === PROBE_KEY) {
+    // 状态追问：题目按他打的分现算，所以这里给的不是题库，是「哪几项、要问到什么」
+    head.push('', probeBlock(ctx) || '（没有取到分数，按一般问法问就行）')
+  } else if (dim === RECONCILE_KEY) {
     const week = lastWeekBlock(ctx)
     head.push('', week || '（没有取到上周的内容，按一般问法问就行）')
   } else {
@@ -358,7 +404,8 @@ const RESULT_SCHEMA = `{
     "后面 2 到 3 条：清单里看不到的东西 —— 为什么、代价、反复出现的模式、跟上周比的变化"
   ],
   "nextFocus": ["下周重点，正好 3 条"],
-  "nextFollowUps": ["下周要跟进的人名，最多 2 个"]
+  "nextFollowUps": ["下周要跟进的人名，最多 2 个"],
+  "stateFollowUp": "分低那几项聊出来的小结：是什么挡着、能不能挪开，一到三句，用他自己的说法；没聊到低分项就写空字符串"
 }`
 
 const RESULT_RULES = `要求：
@@ -374,6 +421,8 @@ const RESULT_RULES = `要求：
   最多 3 条；**不要写成「做了什么」**（那是 events 那一栏的活），也不要写成感想口号。
 - 状态（心情 / 睡眠 / 运动 / 饮食的分数与备注）**不由你产出**：那一段是用户在界面上自己点的，
   别在 JSON 里编这一项，编了也会被界面上的真实数据覆盖。
+- 唯一归你写的是 stateFollowUp：**分低那几项**（≤ 2 星）聊出来的小结 —— 是什么挡着、
+  能不能挪开。一到三句，用他自己的说法，不要写成建议清单；这一轮没聊到低分项就写空字符串。
 - pending 里如果包含对上一周承诺的交代（这次问过对账才会有）：文字里带上「上周说好的」字样，
   例如「上周说好的把报价发出去 —— 只发了初稿」；做到的事不用单列，它本来就在 events 里。
 - highlights 的第一条是**这一周的主线**：一句话说清这周到底是怎么回事、重心落在哪，
@@ -394,6 +443,8 @@ export function buildSummarizePrompt(
   const transcript =
     answers.length > 0 ? formatTranscript(history) : '（对方全程没有给出任何有效回答）'
   const week = lastWeekBlock(ctx)
+  // 他打的分要给模型看：`stateFollowUp` 那一段小结写的就是低分项为什么低
+  const scores = scoresLine(ctx.stateScores, SCORE_MAX)
 
   return [
     {
@@ -408,6 +459,9 @@ ${RESULT_RULES}`,
     {
       role: 'user',
       content: [
+        ...(scores
+          ? [`他在打分卡上给自己打的分：${scores}。（分低的那几项，小结写在 stateFollowUp 里。）`, '']
+          : []),
         ...(week
           ? [
               '他上一周定下来的是：',
@@ -453,7 +507,7 @@ ${RESULT_RULES}
 这一次的额外约定（重要）：
 - events / people / things / pending / growth 这几栏**已经由用户亲手改过**，必须原样保留每一条，一个字都不要改写、不要删除、不要重排。
 - 只有当用户的补充里明确提到了**新**的内容时，才可以把新内容**追加**到这些栏的末尾。
-- 状态（四项分数与备注）不归你管，别动它。
+- 状态（四项分数、备注、追问小结）不归你管，别动它。
 - 你真正要重写的是 highlights、nextFocus、nextFollowUps 这三项。`,
     },
     {

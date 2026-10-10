@@ -1282,6 +1282,27 @@ body {
   margin-top: 12px;
 }
 
+/* 追问小结（0.9.4）：跟备注同一栏，但分开一格 —— 一行是「你自己写的」，
+   一行是「打完分之后聊出来的」，混在一格会让人不知道该改哪个 */
+.state-followup {
+  display: block;
+  margin-top: 10px;
+}
+
+.state-followup-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+}
+
+.state-followup .state-note {
+  margin-top: 0;
+  /* 比备注那一格浅一点：它是聊出来的，不是必须亲手填的 */
+  background: var(--bg);
+}
+
 /* ---------- 状态评分：一排 0–5 星 ---------- */
 
 .state-score {

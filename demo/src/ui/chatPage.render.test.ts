@@ -133,3 +133,44 @@ describe('采访页的状态卡', () => {
     }
   })
 })
+
+/**
+ * 0.9.4：打完分之后接着问 —— 用户提的第一个问题就是「打完分之后就没后续了」。
+ *
+ * 分低的项会先聊一轮「状态追问」，然后才轮到上周对账与四个内容块；
+ * 四项都还行的话这一步整步不存在，用户看不到多出来的一屏。
+ */
+describe('采访页的状态追问', () => {
+  /** 交卡（睡眠 2、运动 1 都算低）→ 定档 */
+  const LOW_SCORES = { mood: 4, sleep: 2, sport: 1, diet: 3 }
+  const ready = (scores: Record<string, number>) =>
+    setDepth(setStateDone(createInterview(), scores), 'mid')
+
+  it('有低分项时：卡收起来，接着是「状态追问」这一步', () => {
+    const html = render({ interview: openBlock(ready(LOW_SCORES), 'probe') })
+    expect(html).not.toContain('class="state-card"')
+    expect(html).toContain('状态追问')
+    expect(html).toContain('分低的那几项，是什么挡着的')
+  })
+
+  it('它不占顶部标签：四个词还是四个，状态追问不在其中', () => {
+    const html = render({ interview: openBlock(ready(LOW_SCORES), 'probe') })
+    expect(html.match(/role="tab"/g)).toHaveLength(4)
+    const tabs = html.match(/class="tab-label">([^<]+)</g) ?? []
+    expect(tabs.join(' ')).not.toContain('状态追问')
+  })
+
+  it('四项都还行：这一步不出现，直接是「上周对账」', () => {
+    const html = render({
+      interview: openBlock(ready({ mood: 4, sleep: 5, sport: 3, diet: 4 }), 'reconcile'),
+    })
+    expect(html).not.toContain('状态追问')
+    expect(html).toContain('上周对账')
+  })
+
+  it('一项都没打分也算「都还行」—— 不能凭空造出一场追问', () => {
+    const html = render({ interview: openBlock(ready({}), 'reconcile') })
+    expect(html).not.toContain('状态追问')
+    expect(html).toContain('上周对账')
+  })
+})

@@ -7,6 +7,7 @@ import {
   buildRefinePrompt,
   buildSummarizePrompt,
   buildTurnPrompt,
+  formatProgress,
   formatTranscript,
 } from './prompts'
 import { DEFAULT_FOLLOWUP_CAP, FOLLOWUP_CAPS, dimensionScript } from './script'
@@ -17,6 +18,7 @@ import {
   type Depth,
   type Dimension,
   type InterviewState,
+  type StateKey,
 } from './types'
 
 /** 测试用的人设：只要能在提示词里认出它就行 */
@@ -44,6 +46,7 @@ function userOf(messages: PromptMessage[]): string {
 /**
  * 拼一个测试态：区块进度可局部覆盖，档位、状态打分卡是否交过都可指定。
  * 默认 `stateDone: true`（卡交过了，流程才进到问答），默认档位「还没定」。
+ * `lowKeys` 给「状态追问」那一步用：默认没有低分项（等于这一步不存在）。
  */
 function stateWith(
   patch: Partial<Record<Dimension, Partial<BlockProgress>>> = {},
@@ -52,6 +55,7 @@ function stateWith(
     depth?: Depth | null
     active?: Dimension | null
     stateDone?: boolean
+    lowKeys?: StateKey[]
   } = {},
 ): InterviewState {
   const base = createInterview({ hasLastWeek: options.hasLastWeek })
@@ -64,6 +68,8 @@ function stateWith(
     active: options.active ?? null,
     blocks,
     stateDone: options.stateDone ?? true,
+    // 这一组用例不碰「状态追问」；要测它的那几条自己传 lowKeys
+    lowKeys: options.lowKeys ?? [],
     depth: options.depth ?? null,
   }
 }
@@ -490,7 +496,7 @@ describe('提示词 · 生成与重新整理', () => {
     // 保留清单点名的是这五栏 + 真正要重写的三项，状态不在其中
     expect(text).toContain('events / people / things / pending / growth 这几栏**已经由用户亲手改过**')
     expect(text).toContain('你真正要重写的是 highlights、nextFocus、nextFollowUps 这三项。')
-    expect(text).toContain('状态（四项分数与备注）不归你管，别动它。')
+    expect(text).toContain('状态（四项分数、备注、追问小结）不归你管，别动它。')
   })
 
   // 注：buildRefinePrompt 把当前结果整个 JSON.stringify 进提示词，所以 user 侧仍然
@@ -500,7 +506,7 @@ describe('提示词 · 生成与重新整理', () => {
       buildRefinePrompt([msg('user', '在改方案', 'event')], createEmptyResult(), '补充一句'),
     )
     expect(text).toContain('"state"')
-    expect(text).toContain('状态（四项分数与备注）不归你管，别动它。')
+    expect(text).toContain('状态（四项分数、备注、追问小结）不归你管，别动它。')
   })
 })
 
@@ -519,5 +525,85 @@ describe('提示词 · 健壮性', () => {
     )
     expect(text).not.toContain('undefined')
     expect(text).not.toContain('NaN')
+  })
+})
+
+/**
+ * 0.9.4 的「状态追问」。
+ *
+ * 这一步**推翻了 0.9.3 的一条约定**：那时提示词里连分数都不给模型看。
+ * 现在必须给 —— 不问分数就问不出「睡眠 2/5 是为什么」。
+ * 但边界没变：分只由界面写，模型只读；而且要问到的哪几项由客户端定，不由模型挑。
+ */
+describe('提示词 · 状态追问', () => {
+  const LOW = { stateScores: { sleep: 2, sport: 1 } }
+
+  it('开场把「他打了几分」和低分那两项要问到什么交给模型', () => {
+    const s = stateWith({}, { active: 'probe', lowKeys: ['sleep', 'sport'] })
+    const text = userOf(buildOpeningPrompt(s, 'probe', [], PERSONA, LOW))
+
+    expect(text).toContain('他给自己打的分：睡眠 2/5 · 运动 1/5。')
+    expect(text).toContain('其中 2 项偏低')
+    expect(text).toContain('睡眠')
+    expect(text).toContain('运动')
+    // 用户点名的两句要真的进提示词
+    expect(text).toContain('挡')
+    expect(text).toContain('挤')
+  })
+
+  it('明说一次只问一项、全部问完才换块 —— 免得模型一口气把两项都问了', () => {
+    const s = stateWith({}, { active: 'probe', lowKeys: ['sleep', 'sport'] })
+    const text = userOf(buildOpeningPrompt(s, 'probe', [], PERSONA, LOW))
+    expect(text).toContain('一次只问一项')
+    expect(text).toContain('[换块]')
+  })
+
+  it('明说别评判、别急着给方案 —— 这一步问的是「什么挡着」', () => {
+    const s = stateWith({}, { active: 'probe', lowKeys: ['sleep'] })
+    const text = userOf(buildOpeningPrompt(s, 'probe', [], PERSONA, { stateScores: { sleep: 1 } }))
+    expect(text).toContain('不要评判')
+    expect(text).toContain('别急着给方案')
+  })
+
+  it('没有分数时给一句兜底，而不是发一段空的出去', () => {
+    const s = stateWith({}, { active: 'probe', lowKeys: [] })
+    const text = userOf(buildOpeningPrompt(s, 'probe', [], PERSONA, {}))
+    expect(text).toContain('没有取到分数')
+  })
+
+  it('一轮里告诉模型这一轮要问到哪一项，以及追问上限', () => {
+    const s = stateWith({}, { active: 'probe', depth: 'mid', lowKeys: ['sleep', 'sport'] })
+    const history = [
+      msg('ai', '睡不好是为什么？', 'probe'),
+      msg('user', '躺下之后脑子停不下来。', 'probe'),
+    ]
+    const text = userOf(buildTurnPrompt(s, 'probe', history, PERSONA))
+    expect(text).toContain('睡眠')
+    expect(text).toContain('上限 2 次')
+    // 换项之后问的是第二项
+    expect(text).toContain('运动')
+  })
+
+  it('进度里只在真有低分项时才提这一步，而且排在最前面', () => {
+    const withLow = stateWith({}, { stateDone: true, lowKeys: ['sleep'] })
+    expect(formatProgress(withLow)).toContain('状态追问（问到第 1/1 项）')
+    expect(formatProgress(withLow).startsWith('状态追问')).toBe(true)
+
+    const without = stateWith({}, { stateDone: true })
+    expect(formatProgress(without)).not.toContain('状态追问')
+  })
+
+  it('生成时的 schema 里有 stateFollowUp，但分数仍然声明不由模型产出', () => {
+    const text = textOf(
+      buildSummarizePrompt([msg('user', '在改方案', 'event')], LOW),
+    )
+    expect(text).toContain('stateFollowUp')
+    expect(text).toContain('不由你产出')
+    expect(text).toContain('他在打分卡上给自己打的分：睡眠 2/5 · 运动 1/5。')
+  })
+
+  it('没有分数时不往生成提示词里塞一行空的打分', () => {
+    const text = textOf(buildSummarizePrompt([msg('user', '在改方案', 'event')], {}))
+    expect(text).not.toContain('他在打分卡上给自己打的分')
   })
 })

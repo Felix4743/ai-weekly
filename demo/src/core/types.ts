@@ -1,12 +1,16 @@
 /**
  * 采访区块。内容是四块（事情 / 人际 / 物品与支出 / 成长），
- * `reconcile`（上周对账）是夹在定档与事情之间的一道单题，只在上周有记录时问。
+ * 另外两道夹在流程里的单题：`probe`（状态追问）与 `reconcile`（上周对账）。
  * 顺序就是 `script.ts` 里 `SCRIPT` 的顺序。
  *
- * 「状态」不是问答块 —— 0.9.3 起它是开场一张打分卡（四项 0–5 星 + 一行备注），
- * 不进 `SCRIPT`，也不占 AI 轮次。
+ * - `probe`（0.9.4 新加）：打完分之后，**按打分**追着低分那几项问。
+ *   几道题由分数决定（≤ 2 星才算低分），四项都还行就整步跳过。
+ * - `reconcile`：只在上周有记录时才问。
+ *
+ * 「状态」本身仍然不是问答块 —— 它是开场一张打分卡（四项 0–5 星 + 一行备注），
+ * 不进 `SCRIPT`，也不占 AI 轮次。`probe` 追问的是这张卡上的分数，不是卡本身。
  */
-export type Dimension = 'reconcile' | 'event' | 'people' | 'thing' | 'growth'
+export type Dimension = 'probe' | 'reconcile' | 'event' | 'people' | 'thing' | 'growth'
 
 /** 复盘深度：深度 / 中度 / 快速，由用户在状态打分卡之后自己挑 */
 export type Depth = 'deep' | 'mid' | 'fast'
@@ -61,6 +65,13 @@ export interface InterviewState {
    */
   stateDone: boolean
   /**
+   * 交卡那一刻挑出来的低分项（≤ 2 星），也就是 `probe` 那一步要问的几项。
+   *
+   * 放在这里而不是每次现算，是因为**流程要据此决定问几道题、要不要整步跳过**：
+   * 卡一交、分数就定了，之后在结果页改分不该把已经问过的追问倒回去。
+   */
+  lowKeys: StateKey[]
+  /**
    * 复盘深度档位；null 表示还没挑。
    * 挑档位是客户端的三个按钮，不是让模型去猜 —— 确定性才算得清覆盖率。
    */
@@ -102,6 +113,13 @@ export interface InterviewContext {
   lastWeekKey?: string
   /** 本周已经有记录了；有就走「接着上次补」 */
   thisWeek?: ThisWeekSummary
+  /**
+   * 他在这周打分卡上点的分（0.9.4 起）。
+   *
+   * 给模型看是**只读**的用途：`probe` 那一步要据此问「睡眠 2/5 是为什么」，
+   * 模型看得见分才问得准。但它**写不了分** —— 落盘的永远是界面上真实的点击。
+   */
+  stateScores?: StateScores
 }
 
 /**
@@ -123,7 +141,7 @@ export type StateKey = (typeof STATE_KEYS)[number]
 export type StateScores = Partial<Record<StateKey, number>>
 
 /**
- * 状态那一段：四项各一个 0–5 星的分，外加一行备注。
+ * 状态那一段：四项各一个 0–5 星的分，外加一行备注，外加一段追问小结。
  *
  * 分数可以不点（未打分），备注可以留空 —— 两个都空就是「没说状态」。
  */
@@ -137,6 +155,15 @@ export interface WeeklyState {
   scores?: StateScores
   /** 想补一句就写在这儿；旧档那四行状态文字也并到这一行 */
   note: string
+  /**
+   * 低分项聊出来的小结（0.9.4 新加，可选）。
+   *
+   * 为什么不并进 `note`：`note` 是**用户自己写的字**，而这一段是模型据追问对话写的。
+   * 两者混在一个字段里，「接着补」的第二轮就会把上一轮的小结原样再抄一遍，
+   * 而且用户改过的那句话会被顶掉。分开存之后，界面上仍然是「状态那一栏里的两行」，
+   * 导出也挨在一起，但谁是谁一目了然 —— 老档没有这个键，读回来就是空。
+   */
+  followUp?: string
 }
 
 export function createEmptyState(): WeeklyState {

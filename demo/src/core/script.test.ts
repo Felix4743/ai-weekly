@@ -4,6 +4,7 @@ import {
   DEFAULT_FOLLOWUP_CAP,
   DEPTHS,
   FOLLOWUP_CAPS,
+  PROBE_KEY,
   RECONCILE_KEY,
   SCRIPT,
   TOTAL_MAIN_QUESTIONS,
@@ -21,9 +22,17 @@ import type { Depth, Dimension } from './types'
 const MAIN_COUNTS: Record<string, number> = { event: 6, people: 4, thing: 4, growth: 2 }
 
 describe('采访脚本 · 区块与顺序', () => {
-  it('顺序是 上周对账 → 事情 → 人际 → 物品与支出 → 成长（状态卡不在脚本里）', () => {
-    expect(SCRIPT.map((d) => d.key)).toEqual(['reconcile', 'event', 'people', 'thing', 'growth'])
+  it('顺序是 状态追问 → 上周对账 → 事情 → 人际 → 物品与支出 → 成长（状态卡不在脚本里）', () => {
+    expect(SCRIPT.map((d) => d.key)).toEqual([
+      'probe',
+      'reconcile',
+      'event',
+      'people',
+      'thing',
+      'growth',
+    ])
     expect(SCRIPT.map((d) => d.label)).toEqual([
+      '状态追问',
       '上周对账',
       '事情',
       '人际',
@@ -38,27 +47,35 @@ describe('采访脚本 · 区块与顺序', () => {
     expect(isContentBlock('mood' as Dimension)).toBe(false)
   })
 
-  it('只有「上周对账」是夹在中间的 step，其余四块都是 block', () => {
+  it('「状态追问」与「上周对账」是夹在中间的 step，其余四块都是 block', () => {
+    expect(dimensionScript('probe')?.kind).toBe('step')
     expect(dimensionScript('reconcile')?.kind).toBe('step')
     for (const key of ['event', 'people', 'thing', 'growth'] as const) {
       expect(dimensionScript(key)?.kind).toBe('block')
     }
   })
 
-  it('CONTENT_BLOCKS 只收内容块，不含上周对账', () => {
+  it('状态追问的题目不写死在这儿 —— 它按分数现算（见 probe.ts）', () => {
+    expect(dimensionScript('probe')?.mainQuestions).toEqual([])
+    expect(dimensionScript('probe')?.followUps).toEqual([])
+  })
+
+  it('CONTENT_BLOCKS 只收内容块，不含状态追问与上周对账', () => {
     expect(CONTENT_BLOCKS).toHaveLength(4)
     expect(CONTENT_BLOCKS.map((d) => d.key)).toEqual(['event', 'people', 'thing', 'growth'])
     expect(CONTENT_BLOCKS.every((d) => d.kind === 'block')).toBe(true)
     expect(CONTENT_BLOCKS.some((d) => d.key === RECONCILE_KEY)).toBe(false)
+    expect(CONTENT_BLOCKS.some((d) => d.key === PROBE_KEY)).toBe(false)
   })
 
-  it('每个区块都有名字、说明和至少一道参考题目', () => {
+  it('每个区块都有名字、说明和至少一道参考题目（状态追问例外，它的题目按分数现算）', () => {
     const labels = SCRIPT.map((d) => d.label)
     expect(new Set(labels).size).toBe(labels.length)
 
     for (const d of SCRIPT) {
       expect(d.label.trim().length).toBeGreaterThan(0)
       expect(d.hint.trim().length).toBeGreaterThan(0)
+      if (d.key === PROBE_KEY) continue
       expect(d.mainQuestions.length).toBeGreaterThan(0)
       // 0.9.3 的题只有「意思 + 示例」：示例是演示模式要念的那一句，不能是空的
       for (const spec of d.mainQuestions) {
@@ -86,14 +103,16 @@ describe('采访脚本 · 区块与顺序', () => {
     expect(new Set(all).size).toBe(all.length)
   })
 
-  it('每个区块都有追问池，人际块另留了一条「聊开了才问」的可选题', () => {
-    for (const d of SCRIPT) {
+  it('内容块都有追问池，人际块另留了一条「聊开了才问」的可选题', () => {
+    for (const d of CONTENT_BLOCKS) {
       expect(d.followUps.length).toBeGreaterThan(0)
       for (const spec of d.followUps) {
         expect(spec.intent.trim().length).toBeGreaterThan(0)
         expect(spoken(spec).trim().length).toBeGreaterThan(0)
       }
     }
+    // 对账那道单题也有自己的追问池
+    expect(dimensionScript('reconcile')?.followUps.length).toBeGreaterThan(0)
     expect(dimensionScript('people')?.optionalQuestions).toHaveLength(1)
     expect(dimensionScript('event')?.optionalQuestions).toBeUndefined()
   })

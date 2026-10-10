@@ -183,3 +183,31 @@ describe('点击目录跳转的滚动位置', () => {
     expect(targetScrollTop(100.4, 0.2, 60)).toBe(41)
   })
 })
+
+/**
+ * 0.9.4：状态那一栏多了「追问小结」。
+ * 徽标的口径不变 —— 分算几条，文字部分（备注或小结）整体再加一条。
+ */
+describe('目录徽标 · 状态那一条', () => {
+  const stateCount = (state: WeeklyResult['state']) =>
+    countSection({ ...base(), state }, 'state')
+
+  it('只打了分：几项分算几条', () => {
+    expect(stateCount(attachState({ mood: 4, sleep: 2 }, ''))).toBe(2)
+  })
+
+  it('备注与小结都算「文字那一条」，不重复计数', () => {
+    expect(stateCount(attachState({ mood: 4 }, '还行'))).toBe(2)
+    expect(stateCount(attachState({ mood: 4 }, '', '睡眠：想太多'))).toBe(2)
+    expect(stateCount(attachState({ mood: 4 }, '还行', '睡眠：想太多'))).toBe(2)
+  })
+
+  it('什么都没有就是 0 条', () => {
+    expect(stateCount(attachState(undefined, ''))).toBe(0)
+    expect(stateCount(attachState(undefined, '', '   '))).toBe(0)
+  })
+
+  it('只有小结也算一条 —— 否则「聊到了但没打分」在目录里看不出来', () => {
+    expect(countSection({ ...base(), state: attachState(undefined, '', '运动：挤不出时间') }, 'state')).toBe(1)
+  })
+})

@@ -87,6 +87,16 @@ function stateNoteBox(tree: ReactNode): ReactElement | undefined {
   return found
 }
 
+/** 状态卡里的「追问小结」那一格（0.9.4 新加）：样式跟备注共用，靠 state-followup 认人 */
+function stateFollowUpBox(tree: ReactNode): ReactElement | undefined {
+  let found: ReactElement | undefined
+  forEachElement(tree, (el) => {
+    const cls = String(el.props.className ?? '')
+    if (el.type === 'textarea' && cls.includes('state-followup')) found = el
+  })
+  return found
+}
+
 function renderBody(current: WeeklyResult) {
   return renderToStaticMarkup(
     createElement(ResultBody, {
@@ -267,6 +277,60 @@ describe('状态卡（0.9.3 起的四项打分 + 一行备注）', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].state.note).toBe('睡得还行')
     expect('scores' in calls[0].state).toBe(false)
+  })
+
+  // 0.9.4：「追问小结」是状态那一栏里的第二格，跟备注各改各的、谁也不许把谁抹掉
+  it('状态卡里有「追问小结」那一格，空的时候是空串', () => {
+    expect(stateFollowUpBox(bodyTree(result))?.props.value).toBe('')
+    const html = renderBody({
+      ...result,
+      state: attachState({ sleep: 2 }, '还行', '睡眠：躺下停不下来'),
+    })
+    expect(html).toContain('追问小结')
+    expect(html).toContain('睡眠：躺下停不下来')
+  })
+
+  it('改追问小结：不动备注、不动分数', () => {
+    const calls: WeeklyResult[] = []
+    const withDigest = {
+      ...result,
+      state: attachState({ mood: 4, sleep: 2 }, '这周还行', '旧小结'),
+    }
+    const box = stateFollowUpBox(bodyTree(withDigest, (next) => calls.push(next)))
+    box?.props.onChange({ target: { value: '睡眠：躺下停不下来' } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].state.followUp).toBe('睡眠：躺下停不下来')
+    expect(calls[0].state.note).toBe('这周还行')
+    expect(calls[0].state.scores).toEqual({ mood: 4, sleep: 2 })
+  })
+
+  it('改备注：追问小结原样留着（漏了这条约定，改一个错字就把小结抹了）', () => {
+    const calls: WeeklyResult[] = []
+    const withDigest = {
+      ...result,
+      state: attachState({ sleep: 2 }, '旧备注', '睡眠：躺下停不下来'),
+    }
+    const box = stateNoteBox(bodyTree(withDigest, (next) => calls.push(next)))
+    box?.props.onChange({ target: { value: '新备注' } })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].state.note).toBe('新备注')
+    expect(calls[0].state.followUp).toBe('睡眠：躺下停不下来')
+  })
+
+  it('点星：追问小结也留着', () => {
+    const calls: WeeklyResult[] = []
+    const withDigest = {
+      ...result,
+      state: attachState({ sleep: 2 }, '还行', '睡眠：躺下停不下来'),
+    }
+    const row = scoreRows(bodyTree(withDigest, (next) => calls.push(next)))[0]
+    row?.props.onChange(5)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].state.scores).toEqual({ mood: 5, sleep: 2 })
+    expect(calls[0].state.followUp).toBe('睡眠：躺下停不下来')
   })
 })
 

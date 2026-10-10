@@ -110,11 +110,25 @@ export function spoken(spec: QuestionSpec | undefined): string {
 /**
  * 采访脚本。
  *
- * 顺序 = 采访顺序：**上周对账 → 事情 → 人际 → 物品与支出 → 成长**。
- * 更前面还有开场那张状态打分卡（不在 SCRIPT 里，它是客户端的一屏），
+ * 顺序 = 采访顺序：**状态追问 → 上周对账 → 事情 → 人际 → 物品与支出 → 成长**。
+ * 更前面还有开场那张状态打分卡（不在 SCRIPT 里，它是客户端的一屏）。
  * 成长放最后是用户定的：先把做过的事、跟人的事、钱的事理完，最后聊长了什么见识。
+ *
+ * `probe`（状态追问，0.9.4 新加）排在第一个内容块之前，因为它问的就是开场那张卡
+ * 上的分数 —— 打完分紧接着问「睡眠 2/5 是为什么」，不隔夜。
+ * 它的题目**不在下面写死**：问几道、问哪几项由分数决定（见 `probe.ts`），
+ * 所以 `mainQuestions` 是空的，由 `interview.ts` 的 `mainQuestionsFor` 现算。
  */
 export const SCRIPT: DimensionScript[] = [
+  {
+    key: 'probe',
+    label: '状态追问',
+    hint: '分低的那几项，是什么挡着的',
+    kind: 'step',
+    // 题目按分数现算（≤ 2 星的项各一道），见 probe.ts 的 probeQuestions
+    mainQuestions: [],
+    followUps: [],
+  },
   {
     key: 'reconcile',
     label: '上周对账',
@@ -275,6 +289,9 @@ export const TOTAL_MAIN_QUESTIONS = CONTENT_BLOCKS.reduce(
 
 /** 没有上一周记录时，对账这一步直接跳过 */
 export const RECONCILE_KEY: Dimension = 'reconcile'
+
+/** 没有低分项时（或者一项都没打分），状态追问这一步整步跳过 */
+export const PROBE_KEY: Dimension = 'probe'
 
 export function dimensionLabel(key: Dimension): string {
   return SCRIPT.find((d) => d.key === key)?.label ?? key

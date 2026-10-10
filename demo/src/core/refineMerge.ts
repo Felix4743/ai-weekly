@@ -78,7 +78,8 @@ export function mergeRefined(current: WeeklyResult, fromModel: WeeklyResult): We
     nextFocus: preferIncoming(current.nextFocus, fromModel.nextFocus),
     nextFollowUps: preferIncoming(current.nextFollowUps, fromModel.nextFollowUps),
     // 状态整组照搬当前的：备注是用户自己写的，分数是他在界面上点出来的，
-    // 模型两边都不该动（不带上这一句，「重新整理」一次就把星星全洗掉了）
-    state: attachState(current.state.scores, current.state.note),
+    // 追问小结是据那场追问写下的 —— 模型三样都不该动。
+    // （不带上这三个参数，「重新整理」一次就把星星和追问小结全洗掉了）
+    state: attachState(current.state.scores, current.state.note, current.state.followUp),
   }
 }

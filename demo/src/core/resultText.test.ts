@@ -152,4 +152,30 @@ describe('结果导出为 Markdown', () => {
     expect(resultToMarkdown(FULL).startsWith('# 本周梳理')).toBe(true)
     expect(resultToMarkdown(EMPTY).startsWith('# 本周梳理')).toBe(true)
   })
+
+  // 0.9.4：低分项的追问小结也写在状态那一节里，跟备注挨着但要能分清谁是谁
+  it('追问小结写在状态一节里，明说是追问来的', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      state: attachState({ sleep: 2 }, '这周还行', '睡眠：躺下停不下来，一般一点多才睡'),
+    })
+    const section = stateSection(md)
+    expect(section).toContain('> 这周还行')
+    expect(section).toContain('> **追问**：睡眠：躺下停不下来，一般一点多才睡')
+  })
+
+  it('只有追问小结、没有备注时，状态一节也有内容', () => {
+    const md = resultToMarkdown({
+      ...FULL,
+      state: attachState(undefined, '', '运动：回到家太晚，挤不出时间'),
+    })
+    const section = stateSection(md)
+    expect(section).toContain('- （无）')
+    expect(section).toContain('> **追问**：运动：回到家太晚，挤不出时间')
+  })
+
+  it('没有小结时不多出这一行', () => {
+    const md = resultToMarkdown({ ...FULL, state: attachState({ mood: 4 }, '还行') })
+    expect(stateSection(md)).not.toContain('追问')
+  })
 })

@@ -33,17 +33,30 @@ export function ResultBody({
 }: Props) {
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
-  /** 备注就一行，改它不动分数 */
+  /**
+   * 备注就一行，改它不动分数；**追问小结必须原样带过去** ——
+   * `attachState` 只认传进去的那几样，漏一个就等于把那一段抹掉。
+   */
   const setStateNote = (note: string) =>
     onResultChange({
       ...result,
-      state: attachState(result.state.scores, note),
+      state: attachState(result.state.scores, note, result.state.followUp),
+    })
+  /** 追问小结同理：改它不动用户自己写的备注 */
+  const setStateFollowUp = (text: string) =>
+    onResultChange({
+      ...result,
+      state: attachState(result.state.scores, result.state.note, text),
     })
   /** 点星：再点同一颗就把这一项拿掉；一项都没了就不写 scores 这个键 */
   const setStateScore = (key: StateKey, value: number | undefined) =>
     onResultChange({
       ...result,
-      state: attachState(withScore(result.state.scores, key, value), result.state.note),
+      state: attachState(
+        withScore(result.state.scores, key, value),
+        result.state.note,
+        result.state.followUp,
+      ),
     })
 
   return (
@@ -113,7 +126,7 @@ export function ResultBody({
       <CollapsibleCard
         sectionKey="state"
         title="状态"
-        desc="四项各点几颗星 · 想说什么写在下面那一行"
+        desc="四项各点几颗星 · 备注与追问小结都能改"
         count={countSection(result, 'state')}
         collapsed={collapsed.state}
         onToggle={() => onToggle('state')}
@@ -136,6 +149,18 @@ export function ResultBody({
             placeholder="这周状态想补一句什么…（可以空着）"
             onChange={(e) => setStateNote(e.target.value)}
           />
+          {/* 低分那几项聊出来的东西：跟备注同一栏，但分开一格，免得跟用户自己写的那句混起来。
+              两个 textarea 共用 state-note 的样式，靠 state-followup 这个类区分谁是谁 */}
+          <label className="state-followup">
+            <span className="state-followup-label">追问小结</span>
+            <textarea
+              className="state-note state-followup"
+              rows={2}
+              value={result.state.followUp ?? ''}
+              placeholder="分低的那几项，聊出来是什么挡着的…（没聊到就是空的）"
+              onChange={(e) => setStateFollowUp(e.target.value)}
+            />
+          </label>
         </div>
       </CollapsibleCard>
 
