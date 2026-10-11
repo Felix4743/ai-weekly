@@ -52,7 +52,7 @@ env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1'
  * `--packaged` 改成拉**装好的那一份**（`D:\AI周报\`）而不是源码。
  *
  * 与 `smoke.mjs` 的两种用法同理：「源码里跑得通」和「装出来那一份跑得通」是两件事。
- * 装机目录在工作区外面，换过位置就设
+ * 装机目录在工作区外面（在工作区内会被沙箱打上 Low 完整性标签、打不开），换过位置就设
  * 环境变量 `AI_WEEKLY_INSTALL_DIR`。
  */
 const PACKAGED = process.argv.includes('--packaged')

@@ -211,13 +211,14 @@ npm run dist                 # 重建它的安装包，落在 demo\release\
 文档里也指着它；要腾空间可以删，`npm run pack` 随时能重建。
 
 **装机版不在这个目录了**：装出来的那一份现在在 `D:\AI周报\`（工作区外面），
-免得再被 DSH 的沙箱标签波及。
+免得再被 DSH 的沙箱标签波及（工作区里的 exe 会被打上 Low 完整性标签，打不开）。
 路径同步改过卸载项与两条快捷方式；`mvp/*` 仍然整块忽略（只放行本 README）。
 
 升级它：跑一次新的安装包，安装路径选 **`D:\AI周报`**，NSIS 会就地覆盖成新版本。
 **0.9.5 实测**：静默升级用 `ai-weekly-<版本>-setup.exe /S /D=D:\AI周报`（`/D=` 放最后、不加引号，
 perMachine=false 所以不问 UAC），装完 `AI周报.exe` 的版本号会跟着变；**但安装程序会把整个卸载键重写一遍，
-`InstallLocation` 不在它的写入清单里、会被丢掉，要手动补回来**。
+`InstallLocation` 不在它的写入清单里、会被丢掉，要手动补回来**：
+`reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\67abd1ae-81be-5c1f-bf9a-44baed2e9a78" /v InstallLocation /t REG_SZ /d "D:\AI周报" /f`。
 **0.8.1 → 0.9.3 都不改归档格式**：旧周的 `result` 读回来只是多补一个空的 `state` 栏（分数那一格没有就是不写），
 0.9.3 起再把状态四行文字并成一行备注、补一个空的 `growth` 列表，内容一条都不动；
 真正改格式的是 0.9.0 那条支线（见上），已经退回来了。
