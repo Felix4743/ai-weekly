@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { createInterview, finishAll, openBlock, setDepth, setStateDone } from '../core/interview'
 import { STATE_FIELDS } from '../core/stateFields'
-import type { ChatMessage, Dimension, InterviewState, StateScores } from '../core/types'
+import type { ChatMessage, Dimension, InterviewState, Note, StateScores } from '../core/types'
 import { ChatPage } from './ChatPage'
 
 /**
@@ -56,6 +56,12 @@ function render(options: {
   stateNote?: string
   busy?: boolean
   missed?: { dim: Dimension; labels: string[] } | null
+  /**
+   * 这一周的采访开过头没有。默认 **true**：绝大多数用例说的是采访里的样子，
+   * 落地页（随心记）那几条自己传 `false`。
+   */
+  started?: boolean
+  notes?: Note[]
 }) {
   return renderToStaticMarkup(
     createElement(ChatPage, {
@@ -81,6 +87,11 @@ function render(options: {
       onDismissMissed: () => {},
       onStartFresh: () => {},
       onGenerate: () => {},
+      started: options.started ?? true,
+      onStartInterview: () => {},
+      notes: options.notes ?? [],
+      onAddNote: () => {},
+      onRemoveNote: () => {},
     }),
   )
 }
@@ -282,5 +293,72 @@ describe('采访页的「这块还差几样」提示', () => {
     expect(html).toContain('还差 3 样没聊到')
     expect(html).toContain('要点一；要点二')
     expect(html).not.toContain('要点三')
+  })
+})
+
+/**
+ * 0.9.9：周中随心记。
+ *
+ * 用户的原话是「把上面的四栏和下面的还差一步，还有本周梳理可以删掉，然后补充个随心记」——
+ * 这一周的采访还没开过头时，对话页整页只有那张随心记卡；开了头就一切照旧。
+ */
+describe('采访页的随心记落地页', () => {
+  const note = (id: string, text: string, at: number): Note => ({
+    id,
+    at,
+    date: '2026-09-28',
+    text,
+    dim: 'event',
+  })
+
+  it('还没开过头：整页只有随心记，四栏 / 打分卡 / 生成按钮一概不在', () => {
+    const html = render({ started: false })
+    expect(html).toContain('class="notes-card"')
+    expect(html).toContain('随心记')
+    expect(html).not.toContain('role="tab"')
+    expect(html).not.toContain('class="state-card"')
+    expect(html).not.toContain('class="stage"')
+    expect(html).not.toContain('class="composer"')
+    expect(html).not.toContain('生成我的本周梳理')
+    expect(html).toContain('开始这周的梳理')
+  })
+
+  it('一条都还没记：给一句空态，而不是一张空列表', () => {
+    const html = render({ started: false })
+    expect(html).toContain('class="notes-empty"')
+    expect(html).not.toContain('class="note-item"')
+    expect(html).toContain('还没记过')
+  })
+
+  it('记过的按最新在上排，每条带日子、原文与自动归的类', () => {
+    const html = render({
+      started: false,
+      notes: [note('n1', '周一那句', 1), note('n2', '周三那句', 3)],
+    })
+    expect(html).toContain('记了 2 条')
+    expect(html.indexOf('周三那句')).toBeLessThan(html.indexOf('周一那句'))
+    expect(html).toContain('9月28日')
+    expect(html).toContain('class="note-tag"')
+    expect(html.match(/class="note-del"/g)).toHaveLength(2)
+  })
+
+  it('采访已经开头了就不再回落地页（哪怕一条都没记）', () => {
+    const html = render({ started: true })
+    expect(html).not.toContain('class="notes-card"')
+    expect(html).toContain('class="state-card"')
+  })
+
+  it('正在聊某一块时也不出现', () => {
+    const html = render({ started: false, interview: IN_BLOCK, messages: CHAT })
+    expect(html).not.toContain('class="notes-card"')
+    expect(html).toContain('这周主要忙了些什么？')
+  })
+
+  it('打分卡与定档这两步不再挂那块空对话区（原来的「还差一步」）', () => {
+    for (const interview of [ON_CARD, ON_DEPTH]) {
+      const html = render({ interview })
+      expect(html).not.toContain('class="stage"')
+      expect(html).not.toContain('还差一步')
+    }
   })
 })

@@ -7,10 +7,19 @@ import {
   nextStage,
   pointsInBlock,
 } from '../core/interview'
+import { NOTE_TEXT_MAX, noteDateLabel, noteDimLabel, notesCountText } from '../core/notes'
 import { STATE_FIELDS } from '../core/stateFields'
-import type { ChatMessage, Depth, Dimension, InterviewState, StateKey, StateScores } from '../core/types'
+import type {
+  ChatMessage,
+  Depth,
+  Dimension,
+  InterviewState,
+  Note,
+  StateKey,
+  StateScores,
+} from '../core/types'
 import { StateScore } from './StateScore'
-import { IconSend, IconSkip, IconSparkle, IconWand } from './icons'
+import { IconClose, IconPlus, IconSend, IconSkip, IconSparkle, IconWand } from './icons'
 
 interface Props {
   messages: ChatMessage[]
@@ -50,6 +59,21 @@ interface Props {
   /** 从头再聊一遍（这周已记的不看、不并） */
   onStartFresh: () => void
   onGenerate: () => void
+  /**
+   * 这一周的采访**有没有开过头**（0.9.9 随心记）。
+   *
+   * 没开过头时整页就是那张「随心记」卡 —— 周中打开软件是来记一句话的，
+   * 不该先看见状态卡、四个标签和「生成梳理」。由 `App.tsx` 拿着这个开关，
+   * 所以这一页仍然是「props 进来、事件出去」的纯组件，起界面就能测。
+   */
+  started: boolean
+  /** 点了「开始这周的梳理」：这一轮采访正式开始 */
+  onStartInterview: () => void
+  /** 这一周的随手记，存的是时间序（早→晚） */
+  notes: Note[]
+  /** 记下一句（空白由 `core/notes.ts` 拦掉，这里不判断） */
+  onAddNote: (text: string) => void
+  onRemoveNote: (id: string) => void
 }
 
 export function ChatPage({
@@ -75,8 +99,16 @@ export function ChatPage({
   onDismissMissed,
   onStartFresh,
   onGenerate,
+  started,
+  onStartInterview,
+  notes,
+  onAddNote,
+  onRemoveNote,
 }: Props) {
   const [draft, setDraft] = useState('')
+  const [noteDraft, setNoteDraft] = useState('')
+  /** 采访里那句「记一句」把随心记卡当抽屉拉出来 —— 落地页上它是整页 */
+  const [notesOpen, setNotesOpen] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
@@ -87,12 +119,24 @@ export function ChatPage({
   const stage = nextStage(interview)
   const nextDim = stage.kind === 'block' ? stage.dim : null
   const allDone = isAllComplete(interview)
+  /** 随心记列表：存的是时间序，界面上最新的一条在最上面 */
+  const newestFirst = [...notes].sort((a, b) => b.at - a.at)
   /** 还没交状态卡：这一屏只有那张卡，别的一概先按住 */
   const showState = stage.kind === 'state'
   /** 状态打完了、还没定档：这一步由用户点按钮决定，不让模型猜 */
   const showDepth = stage.kind === 'depth'
   /** 发送下面那排「聊一聊XX」：当前这一块不用再跳过去 */
   const otherBlocks = CONTENT_BLOCKS.filter((d) => d.key !== active)
+  /**
+   * 第一屏（0.9.9）：这一周的采访还没开过头，也没有哪一块正开着 —— 整页只有「随心记」。
+   * 「有没有开过头」由 `App.tsx` 按「这周是不是已经真聊过东西」算出来，这里只看开关。
+   */
+  const landing = !started && !active && stage.kind === 'state'
+  /**
+   * 打分卡 / 定档这两步，**当前这一步就是上面那张卡** —— 下面那块空的对话区整个不画。
+   * 0.9.8 之前这里挂着一张 250px 高的白卡，标题写着「还差一步」，看着像漏了东西。
+   */
+  const showStage = !(showState || showDepth)
 
   useEffect(() => {
     const el = bodyRef.current
@@ -110,6 +154,111 @@ export function ChatPage({
     if (!text || busy || !active) return
     setDraft('')
     onSend(text)
+  }
+
+  /** 记一句（空白不提交，输入框留着不动） */
+  const submitNote = () => {
+    const text = noteDraft.trim()
+    if (!text) return
+    setNoteDraft('')
+    onAddNote(text)
+  }
+
+  /**
+   * 那张随心记卡。落地页整页就是它；采访里点「记一句」时它再以抽屉的样子出现 ——
+   * 两处共用同一份，改文案只改这里。
+   *
+   * `compact` 是抽屉模式：说明句收起来、列表自己滚、底下那句「开始这周的梳理」不画
+   * （都进采访了，再摆一个开始按钮没道理），右上角换个「收起来」的叉。
+   *
+   * 存的是时间序（提示词要按周一→周日念），界面倒过来：最新的一条在最上面。
+   */
+  const notesCard = (compact: boolean) => (
+    <section className={`notes-card${compact ? ' compact' : ''}`}>
+      <header className="notes-head">
+        <span className="notes-title">
+          <IconWand size={17} />
+          随心记
+        </span>
+        <span className="notes-count">
+          {notesCountText(notes.length)}
+          {compact && (
+            <button
+              className="note-close"
+              type="button"
+              title="收起来"
+              aria-label="收起来"
+              onClick={() => setNotesOpen(false)}
+            >
+              <IconClose size={14} />
+            </button>
+          )}
+        </span>
+      </header>
+      <p className="notes-desc">
+        周中想到什么就记一句 —— 不聊、不评、不打分。周末坐下来梳理的时候，这些会当线索带上。
+      </p>
+
+      <div className="note-composer">
+        <input
+          className="note-input"
+          type="text"
+          value={noteDraft}
+          maxLength={NOTE_TEXT_MAX}
+          placeholder="现在想到什么，记一句…"
+          onChange={(e) => setNoteDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submitNote()
+          }}
+        />
+        <button
+          className="btn primary"
+          type="button"
+          disabled={noteDraft.trim().length === 0}
+          onClick={submitNote}
+        >
+          <IconPlus size={15} />
+          记下
+        </button>
+      </div>
+
+      {newestFirst.length === 0 ? (
+        <p className="notes-empty">这周还什么都没记。想到一句就写在这儿，别等周末。</p>
+      ) : (
+        <ul className="note-list">
+          {newestFirst.map((n) => (
+            <li key={n.id} className="note-item">
+              <span className="note-date">{noteDateLabel(n)}</span>
+              <span className="note-text">{n.text}</span>
+              <span className="note-tag">{noteDimLabel(n.dim)}</span>
+              <button
+                className="note-del"
+                type="button"
+                title="删掉这条"
+                aria-label="删掉这条"
+                onClick={() => onRemoveNote(n.id)}
+              >
+                <IconClose size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!compact && (
+        <div className="notes-foot">
+          <button className="btn ink" type="button" disabled={busy} onClick={onStartInterview}>
+            <IconSparkle size={15} />
+            开始这周的梳理
+          </button>
+          <span className="notes-foot-hint">开始之后随时可以回来接着记</span>
+        </div>
+      )}
+    </section>
+  )
+
+  if (landing) {
+    return <main className="page chat">{notesCard(false)}</main>
   }
 
   return (
@@ -150,6 +299,9 @@ export function ChatPage({
       <div className="progress-track">
         <div className="progress-fill" style={{ width: `${progress}%` }} />
       </div>
+
+      {/* 采访里也能随手记（0.9.9）：想到一件还没轮到的事，先记下来，别打断当下这一块 */}
+      {notesOpen && <div className="notes-drawer">{notesCard(true)}</div>}
 
       {/* 第一步：状态卡。先打完分，再问要聊多细 —— 顺序由流程保证，不靠提示词求人 */}
       {showState && (
@@ -210,34 +362,24 @@ export function ChatPage({
         </section>
       )}
 
+      {showStage && (
       <section className="stage">
         <header className="stage-head">
-          <span className="stage-title">
-            {script?.label ?? (showState || showDepth ? '还差一步' : '选一块开始')}
-          </span>
+          <span className="stage-title">{script?.label ?? '选一块开始'}</span>
           <span className="stage-hint">{script?.hint ?? ''}</span>
           {activeComplete && <span className="stage-done">这一块聊完了 · 想继续就说</span>}
         </header>
 
         <div className="stage-body" ref={bodyRef}>
-          {!active &&
-            (showState || showDepth ? (
-              /* 上面那张卡才是当前这一步（打分 / 定档）：这里只留一行字，
-                 别让下面挂着一整块什么都没写的白卡（也不放图标，那样会顶出裁切） */
-              <p className="stage-idle">
-                {showState
-                  ? '先给这周打个分，接着就从这里开始聊。'
-                  : '选一个聊到多细，接着就从这里开始问。'}
-              </p>
-            ) : (
-              <div className="stage-empty">
-                <span className="stage-empty-mark" aria-hidden="true">
-                  <IconSparkle size={20} />
-                </span>
-                <p className="block-empty">点上面任意一块，开始聊。</p>
-                <p className="stage-empty-note">一次只聊一块，聊完再换下一块。</p>
-              </div>
-            ))}
+          {!active && (
+            <div className="stage-empty">
+              <span className="stage-empty-mark" aria-hidden="true">
+                <IconSparkle size={20} />
+              </span>
+              <p className="block-empty">点上面任意一块，开始聊。</p>
+              <p className="stage-empty-note">一次只聊一块，聊完再换下一块。</p>
+            </div>
+          )}
 
           {active && blockMessages.length === 0 && !typing && (
             <p className="block-empty">正在准备第一个问题…</p>
@@ -279,6 +421,7 @@ export function ChatPage({
           )}
         </div>
       </section>
+      )}
 
       <div className="composer">
         {/* 上一块收尾时还差着的要点：不自动补问，只提示一句，由用户决定。
@@ -389,6 +532,16 @@ export function ChatPage({
           {/* 发送下面：不用回到顶部，随时换一块聊 */}
           <div className="quick-jumps">
             <span className="quick-jumps-label">{active ? '换个话题' : '从哪一块开始'}</span>
+            {/* 想到一件还没轮到的事，先记下来 —— 记完接着聊，不打断这一块 */}
+            <button
+              className={`btn chip${notesOpen ? ' on' : ''}`}
+              type="button"
+              aria-expanded={notesOpen}
+              onClick={() => setNotesOpen((v) => !v)}
+            >
+              <IconPlus size={14} />
+              记一句
+            </button>
             {otherBlocks.map((d) => (
               <button
                 key={d.key}

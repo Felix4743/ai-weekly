@@ -141,6 +141,15 @@ export function IconBack({ size = 16, className }: IconProps) {
   )
 }
 
+/** 删掉一条随手记：一个叉。 */
+export function IconClose({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size, className)}>
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </svg>
+  )
+}
+
 /** 重来一次：环形箭头。 */
 export function IconRefresh({ size = 16, className }: IconProps) {
   return (

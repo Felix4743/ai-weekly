@@ -2409,3 +2409,243 @@ body {
   line-height: 1.6;
   text-align: center;
 }
+
+/* ---------------- 随心记（0.9.9）：周中打开软件看到的第一屏 ---------------- */
+
+.notes-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 26px 28px 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notes-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.notes-title svg {
+  color: var(--accent);
+}
+
+.notes-count {
+  font-size: var(--fs-cap);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.notes-desc {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+.note-composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.note-input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.note-input::placeholder {
+  color: var(--ink-3);
+}
+
+.note-input:focus {
+  outline: none;
+  background: var(--panel);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.notes-empty {
+  margin: 2px 0 0;
+  padding: 20px;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  text-align: center;
+  background: var(--panel-2);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+.note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 8px 10px 10px;
+  border-left: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.note-item:hover {
+  background: var(--panel-hover);
+  border-left-color: var(--accent-line);
+}
+
+.note-date {
+  flex: none;
+  min-width: 62px;
+  font-size: var(--fs-cap);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.note-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-body);
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.note-tag {
+  flex: none;
+  padding: 2px 8px;
+  font-size: var(--fs-cap);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-pill);
+}
+
+.note-del {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--ink-3);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  opacity: 0.45;
+  transition:
+    opacity var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.note-item:hover .note-del {
+  opacity: 1;
+}
+
+.note-del:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+}
+
+.notes-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.notes-foot-hint {
+  font-size: var(--fs-cap);
+  color: var(--ink-3);
+}
+
+/* 采访里点「记一句」拉开的那张卡：跟落地页同一张，只是矮一点、贴着上面那排标签 */
+.notes-drawer {
+  margin-bottom: 12px;
+}
+
+.notes-drawer .notes-card {
+  padding: 18px 22px 18px;
+  box-shadow: var(--shadow-xs);
+}
+
+.notes-drawer .notes-desc {
+  display: none;
+}
+
+.notes-drawer .notes-empty {
+  padding: 14px;
+}
+
+/* 记多了不能让这张卡把沙发挤走：列表自己滚，卡片不往上长 */
+.notes-card.compact .note-list {
+  max-height: 174px;
+  overflow-y: auto;
+  margin-right: -4px;
+  padding-right: 4px;
+}
+
+.note-close {
+  margin-left: 8px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.note-close:hover {
+  background: var(--panel-3);
+  color: var(--ink);
+}
+
+/* 抽屉开着时那颗芯片换个样子，好知道再点一下是收起来 */
+.btn.chip.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+@media (max-width: 680px) {
+  .note-composer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

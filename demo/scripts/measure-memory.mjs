@@ -323,6 +323,60 @@ async function clickStateStar(client, rowLabel, starIndex) {
 }
 
 /**
+ * 按文字点一个按钮：`selector` 圈范围，`text` 是按钮上的一句话（用「包含」找）。
+ *
+ * 这几屏的按钮都没有稳定的类名可挑（「开始这周的梳理」在 `.notes-foot` 里、
+ * 「记一句」混在那排换块的芯片里），按文字找最省事，也不怕以后挪位置。
+ */
+async function clickText(client, selector, text) {
+  return evaluate(
+    client,
+    `const b = [...document.querySelectorAll(${JSON.stringify(selector)})]
+       .find((x) => x.textContent.includes(${JSON.stringify(text)}))
+     if (!b) return false
+     b.click()
+     return true`,
+  )
+}
+
+/**
+ * 0.9.9 起，周中打开软件先看到的是「随心记」落地页：四栏标签、打分卡、生成按钮都不在，
+ * 只有那张卡和一句「开始这周的梳理」。要走到打分卡，得先在落地页上点这一下。
+ *
+ * 这一周要是已经开过头（或者刚才已经点过），落地页不在了，返回 false —— 调用方不用管。
+ */
+async function startInterview(client) {
+  const clicked = await clickText(client, '.notes-foot .btn', '开始这周的梳理')
+  if (clicked) {
+    await sleep(300)
+    await settle(client)
+  }
+  return clicked
+}
+
+/**
+ * 在随心记落地页上记一句（只有截图流程会用到）。
+ *
+ * 输入框是 React 管的受控组件：直接改 `input.value` 它不认，得走原生 setter 再补一个
+ * `input` 事件，React 才看得到这次改动。然后点「记下」。
+ */
+async function addNote(client, text) {
+  return evaluate(
+    client,
+    `const input = document.querySelector('.note-input')
+     if (!input) return false
+     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+     setter.call(input, ${JSON.stringify(text)})
+     input.dispatchEvent(new Event('input', { bubbles: true }))
+     const btn = [...document.querySelectorAll('.note-composer .btn')]
+       .find((b) => b.textContent.includes('记下'))
+     if (!btn) return false
+     btn.click()
+     return true`,
+  )
+}
+
+/**
  * 往当前焦点上敲一个键（截图用：键盘是那排星正经支持的一条路）。
  *
  * 走 CDP 的 `Input.dispatchKeyEvent` 而不是 `el.dispatchEvent` —— 后者造出来的
@@ -404,7 +458,30 @@ async function main() {
    * 设置页那一下放在**整个流程最后**才走 —— 早走会把后面的步骤带偏（进设置等于换了一页）。
    */
   if (SHOT) {
+    // 0.9.9 的第一屏：随心记。空着的样子先留一张，再记三条留一张「记过东西的」，
+    // 最后才点进采访 —— 点进去这一屏就没了
+    await shot(client, 'chat-notes-landing')
+    for (const text of [
+      '跟张总通了电话，预算的事他还是没松口。',
+      '椅子终于下单了，等周末到货。',
+      '这周开始早起跑步，第三天就有点习惯了。',
+    ]) {
+      await addNote(client, text)
+      await sleep(150)
+    }
+    await shot(client, 'chat-notes-filled')
+    await startInterview(client)
     await shot(client, 'chat-state-card')
+    /**
+     * 采访里也能补记：发送框下面那颗「记一句」把同一张卡当抽屉拉出来。
+     * 留一张之后收回去 —— 开着会挡住下面几步要点的东西。
+     */
+    if (await clickText(client, '.quick-jumps .btn', '记一句')) {
+      await sleep(200)
+      await shot(client, 'chat-notes-drawer')
+      await clickText(client, '.quick-jumps .btn', '记一句')
+      await sleep(200)
+    }
     /**
      * 再留一张「打过分的」——0.9.8 那排星换成 PeekRating 之后，光是「没打分」那一张
      * 看不出亮起来是什么样。这里用**键盘**打分：合成的 pointer 事件在 CDP 下不生效
@@ -445,6 +522,7 @@ async function main() {
 
   if (WALK > 0) {
     // 交状态卡：给两项低分，好让「状态追问」那一步真的出现
+    await startInterview(client)
     await clickStateStar(client, '心情', 1) // 心情 2 星
     await clickStateStar(client, '睡眠', 1) // 睡眠 2 星
     await clickStateStar(client, '运动', 0) // 运动 1 星
@@ -476,6 +554,7 @@ async function main() {
    * 正是这一版加的东西，所以拿真实界面验一次 —— 跟 smoke 的理由一样。
    */
   if (SKIP > 0) {
+    await startInterview(client)
     await clickStateStar(client, '睡眠', 1) // 睡眠 2 星 → 让状态追问出现
     await sleep(200)
     await click(client, '.state-card .btn.primary')
@@ -499,6 +578,7 @@ async function main() {
 
   if (WANT_RESULT) {
     // 交卡（给一项低分，好让状态追问也走一遍）→ 定档 → 说一句 → 生成
+    await startInterview(client)
     await clickStateStar(client, '睡眠', 1) // 睡眠 2 星
     await sleep(200)
     await click(client, '.state-card .btn.primary')

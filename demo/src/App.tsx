@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeError } from './core/aiError'
-import { archiveResult, upsertWeek, type WeekEntry } from './core/archive'
+import { archiveResult, addWeekNote, notesOf, removeWeekNote, upsertWeek, type WeekEntry } from './core/archive'
 import { createAiClient } from './core/createAiClient'
 import {
   coveragePercent,
@@ -19,6 +19,7 @@ import {
 } from './core/interview'
 import { hasWeekContent, mergeWeekResult, recapLines } from './core/mergeWeek'
 import { sampleAnswer } from './core/mockAi'
+import { createNote } from './core/notes'
 import { spoken } from './core/script'
 import { attachState, withScore } from './core/stateScore'
 import { stripMarkerForDisplay } from './core/turn'
@@ -109,6 +110,14 @@ export default function App() {
    * （为什么：见 `handleSend` 里收尾对账那一段）。
    */
   const [missed, setMissed] = useState<{ dim: Dimension; labels: string[] } | null>(null)
+  /**
+   * 这一周的采访**开过头没有**（0.9.9 随心记）。
+   *
+   * 没开过头时对话页整页就是那张「随心记」卡：周中打开软件是来记一句话的，
+   * 不该先看见打分卡、四个标签和一排按钮。这个开关由 `startInterview` 定：
+   * 这一周已经真聊过东西（`hasWeekContent`）就直接进采访，否则先在落地页待着。
+   */
+  const [interviewStarted, setInterviewStarted] = useState(false)
 
   // 填了 Key 就是真模型，没填就用假 AI 走通流程
   const { client: ai, mode } = useMemo(
@@ -178,7 +187,13 @@ export default function App() {
         week: resultWeekRef.current,
       })
       commitArchive(
-        upsertWeek(archiveRef.current, { week: resultWeekRef.current, savedAt: at, result: next }),
+        upsertWeek(archiveRef.current, {
+          week: resultWeekRef.current,
+          savedAt: at,
+          result: next,
+          // 这一周的随手记接着留着：改结果不该把平时记的东西弄丢
+          notes: notesOf(archiveRef.current, resultWeekRef.current),
+        }),
       )
     },
     [commitArchive],
@@ -224,6 +239,12 @@ export default function App() {
     const mine = archiveRef.current.find((e) => e.week === thisKey)
     if (!freshRef.current && mine && hasWeekContent(mine.result)) {
       ctx.thisWeek = { savedAt: mine.savedAt, lines: recapLines(mine.result) }
+    }
+
+    // 周中随手记下的碎片：开场带上是让他不用从空白开始回忆（0.9.8）。
+    // 「从头再聊一遍」时不带 —— 那条路的语义就是「这周记的都不看」。
+    if (!freshRef.current && mine && mine.notes.length > 0) {
+      ctx.notes = mine.notes
     }
     return ctx
   }, [])
@@ -271,6 +292,8 @@ export default function App() {
       const mine = options.fresh ? undefined : archiveRef.current.find((e) => e.week === thisKey)
 
       resumeRef.current = Boolean(mine && hasWeekContent(mine.result))
+      // 「从头再聊一遍」是他明确要开始第二轮，落地页不再拦一道
+      setInterviewStarted(options.fresh === true || resumeRef.current)
       // 「从头再聊一遍」连开场那句复述也不要 —— 他要的就是别看这周的旧记录
       freshRef.current = Boolean(options.fresh)
       commitScores(mine?.result.state.scores ?? {})
@@ -641,7 +664,38 @@ export default function App() {
     void startInterview({ fresh: true })
   }, [startInterview])
 
+  /* ---------------- 周中随心记（0.9.9） ---------------- */
+
+  /** 这一周的随手记。存在归档里、跟结果分开：记了不等于聊过 */
+  const weekNotes = useMemo(() => notesOf(archive, weekKeyOf(new Date())), [archive])
+
+  /**
+   * 记一句。
+   *
+   * 只落归档、**不动结果**：笔记是素材，只有周末真聊到了，模型才会把它写进清单。
+   * 空白与超长都由 `createNote` 管（空白返回 null、超长截断）。
+   */
+  const handleAddNote = useCallback(
+    (text: string) => {
+      const note = createNote(text, Date.now())
+      if (!note) return
+      commitArchive(addWeekNote(archiveRef.current, weekKeyOf(new Date()), note))
+    },
+    [commitArchive],
+  )
+
+  const handleRemoveNote = useCallback(
+    (id: string) => {
+      commitArchive(removeWeekNote(archiveRef.current, weekKeyOf(new Date()), id))
+    },
+    [commitArchive],
+  )
+
+  /** 落地页上那句「开始这周的梳理」：从这一刻起这一屏就是采访了 */
+  const handleStartInterview = useCallback(() => setInterviewStarted(true), [])
+
   const activeDim = interview.active
+
   const sampleText = activeDim
     ? sampleAnswer(
         activeDim,
@@ -719,6 +773,11 @@ export default function App() {
           onDismissMissed={handleDismissMissed}
           onStartFresh={handleStartFresh}
           onGenerate={handleGenerate}
+          started={interviewStarted}
+          onStartInterview={handleStartInterview}
+          notes={weekNotes}
+          onAddNote={handleAddNote}
+          onRemoveNote={handleRemoveNote}
         />
       )}
 
