@@ -46,11 +46,13 @@ const GOOD_ARCHIVE: WeekEntry[] = [
     week: '2026-09-21',
     savedAt: 200,
     result: { ...GOOD_SESSION.result, pending: ['报销拖了两周'] },
+    notes: [],
   },
   {
     week: '2026-09-14',
     savedAt: 100,
     result: { ...GOOD_SESSION.result, highlights: ['上一周的主线'] },
+    notes: [],
   },
 ]
 
@@ -230,6 +232,86 @@ describe('存储 · 形状归一化', () => {
       expect(list[0].result.state).toEqual({ note: '身体：睡够了；情绪：还行；心智：读了半本书' })
       // 补成备注之后「成长」那一栏还是空的：老档的心智属于状态，不是这一栏
       expect(list[0].result.growth).toEqual([])
+    })
+  })
+
+  describe('随手记的容错（normalizeArchive）', () => {
+    const note = (text: string, at: number) => ({ id: `n-${text}`, at, date: '2026-09-22', text, dim: 'event' })
+
+    it('老档（还没有 notes 这一栏）读回来是空数组，内容一字不动', () => {
+      const list = normalizeArchive([
+        { week: '2026-09-21', savedAt: 1, result: { ...GOOD_SESSION.result } },
+      ])
+      expect(list).toHaveLength(1)
+      expect(list[0].notes).toEqual([])
+      expect(list[0].result.highlights).toEqual(['方案定了'])
+    })
+
+    it('只有随手记、还没聊过的一周也留得住', () => {
+      const list = normalizeArchive([
+        { week: '2026-09-21', savedAt: 1, notes: [note('想给爸妈打个电话', 1)] },
+      ])
+      expect(list).toHaveLength(1)
+      expect(list[0].notes).toHaveLength(1)
+      // 没有结果就补一个空结果：那一周在日历上要能点开
+      expect(list[0].result.events).toEqual([])
+      expect(list[0].result.highlights).toEqual([])
+      expect(list[0].result.state).toEqual({ note: '' })
+    })
+
+    it('坏笔记逐条丢，好的留下（跟结果那一栏同一个口径）', () => {
+      const list = normalizeArchive([
+        {
+          week: '2026-09-21',
+          savedAt: 1,
+          notes: [
+            '一段字符串',
+            null,
+            { at: 3, text: '   ' },
+            { at: 4, text: '想买个新键盘' },
+          ],
+        },
+      ])
+      expect(list).toHaveLength(1)
+      expect(list[0].notes.map((n) => n.text)).toEqual(['想买个新键盘'])
+      expect(list[0].notes[0].dim).toBe('thing')
+    })
+
+    it('认不出来的 date 和 dim 现场补出来，认出来的原样留着', () => {
+      const at = new Date(2026, 8, 22, 12).getTime()
+      const list = normalizeArchive([
+        {
+          week: '2026-09-21',
+          savedAt: 1,
+          notes: [{ id: 'keep', at, date: '上周二', text: '跟张总通了电话', dim: '瞎写的' }],
+        },
+      ])
+      expect(list[0].notes[0]).toEqual({
+        id: 'keep',
+        at,
+        date: '2026-09-22',
+        text: '跟张总通了电话',
+        dim: 'people',
+      })
+    })
+
+    it('笔记也按时间从早到晚排，界面要倒着显示是界面的事', () => {
+      const list = normalizeArchive([
+        {
+          week: '2026-09-21',
+          savedAt: 1,
+          notes: [note('后记的', 200), note('先记的', 100)],
+        },
+      ])
+      expect(list[0].notes.map((n) => n.text)).toEqual(['先记的', '后记的'])
+    })
+
+    it('一周的笔记超过上限时只留最近的那些', () => {
+      const many = Array.from({ length: 105 }, (_, i) => note(`第 ${i} 条`, i + 1))
+      const list = normalizeArchive([{ week: '2026-09-21', savedAt: 1, notes: many }])
+      expect(list[0].notes).toHaveLength(100)
+      expect(list[0].notes[0].text).toBe('第 5 条')
+      expect(list[0].notes[99].text).toBe('第 104 条')
     })
   })
 

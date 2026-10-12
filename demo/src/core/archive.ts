@@ -1,4 +1,5 @@
-import { type WeeklyResult } from './types'
+import { createEmptyResult, type Note, type WeeklyResult } from './types'
+import { addNote, removeNote } from './notes'
 import {
   addWeeks,
   relationLabel,
@@ -24,6 +25,21 @@ export interface WeekEntry {
   /** 最后一次写入这个时刻 */
   savedAt: number
   result: WeeklyResult
+  /**
+   * 那一周随手记下来的碎片（0.9.8 新增）。
+   *
+   * 它和 `result` 是**同一周的两样东西**：随手记是平时攒的素材（可能一条都没有），
+   * 结果是周末收口之后写下来的那份。所以一周可以有随手记而还没有结果 ——
+   * `result` 这时是一份空结果，界面上照实说「这一周还没有被梳理过」。
+   *
+   * 老档（0.9.7 及以前）没有这个键，读回来是空数组（见 `storage/shape.ts`）。
+   */
+  notes: Note[]
+}
+
+/** 一份空的周条目：只有随手记、还没聊过的那些周就是这样 */
+export function createEmptyEntry(week: WeekKey, savedAt: number): WeekEntry {
+  return { week, savedAt, result: createEmptyResult(), notes: [] }
 }
 
 /**
@@ -64,7 +80,9 @@ export function archiveResult(
   at: number,
   week: WeekKey = weekKeyOf(new Date(at)),
 ): WeekEntry[] {
-  return upsertWeek(list, { week, savedAt: at, result })
+  // 这一周已有的随手记要接着留着 —— 重新生成结果不该把平时记的东西抹掉
+  const existing = findEntry(list, week)
+  return upsertWeek(list, { week, savedAt: at, result, notes: existing?.notes ?? [] })
 }
 
 export function findEntry(list: WeekEntry[], week: WeekKey): WeekEntry | null {
@@ -80,7 +98,48 @@ export function updateWeekResult(
 ): WeekEntry[] {
   const existing = findEntry(list, week)
   if (!existing) return list
-  return upsertWeek(list, { week, savedAt: at, result })
+  return upsertWeek(list, { week, savedAt: at, result, notes: existing.notes })
+}
+
+/** 某一周随手记下的碎片；没有那一周就是空数组 */
+export function notesOf(list: WeekEntry[], week: WeekKey): Note[] {
+  return findEntry(list, week)?.notes ?? []
+}
+
+/**
+ * 往某一周添一条随手记。
+ *
+ * 这一周**还没有条目就现建一个**（结果是空的、只有这一条随手记）—— 这是 0.9.8
+ * 给归档添的新形态：一周可以在没人聊过之前就存在。`savedAt` 跟着更新，
+ * 因为「上次记录是什么时候」问的就是我上次动手是什么时候，记一笔也算。
+ */
+export function addWeekNote(
+  list: WeekEntry[],
+  week: WeekKey,
+  note: Note,
+  at: number = Date.now(),
+): WeekEntry[] {
+  const existing = findEntry(list, week)
+  return upsertWeek(list, {
+    week,
+    savedAt: at,
+    result: existing?.result ?? createEmptyResult(),
+    notes: addNote(existing?.notes ?? [], note),
+  })
+}
+
+/** 删掉某一条随手记；那一周或那一条不存在时原样返回 */
+export function removeWeekNote(
+  list: WeekEntry[],
+  week: WeekKey,
+  id: string,
+  at: number = Date.now(),
+): WeekEntry[] {
+  const existing = findEntry(list, week)
+  if (!existing) return list
+  const notes = removeNote(existing.notes, id)
+  if (notes.length === existing.notes.length) return list
+  return upsertWeek(list, { ...existing, savedAt: at, notes })
 }
 
 /**

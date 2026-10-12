@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
   ARCHIVE_LIMIT,
+  addWeekNote,
   archiveResult,
   archiveStats,
   findEntry,
   lastWrittenAt,
   mainLine,
   moveWeek,
+  notesOf,
   recentSlots,
+  removeWeekNote,
   sortEntries,
   updateWeekResult,
   upsertWeek,
   weekCounts,
   type WeekEntry,
 } from './archive'
+import { createNote } from './notes'
 import { createEmptyResult, type WeeklyResult } from './types'
 
 /**
@@ -26,7 +30,7 @@ function result(overrides: Partial<WeeklyResult> = {}): WeeklyResult {
 }
 
 function entry(week: string, overrides: Partial<WeeklyResult> = {}, savedAt = 1): WeekEntry {
-  return { week, savedAt, result: result(overrides) }
+  return { week, savedAt, result: result(overrides), notes: [] }
 }
 
 /** 本地时间，别让测试自己掉进 UTC 的坑 */
@@ -213,11 +217,101 @@ describe('归档 · 读出来是什么', () => {
     const good = at(2026, 9, 22).getTime()
     expect(
       lastWrittenAt([
-        { week: '2026-09-14', savedAt: Number.NaN, result: result() },
-        { week: '2026-09-21', savedAt: good, result: result() },
+        { week: '2026-09-14', savedAt: Number.NaN, result: result(), notes: [] },
+        { week: '2026-09-21', savedAt: good, result: result(), notes: [] },
       ]),
     ).toBe(good)
-    expect(lastWrittenAt([{ week: '2026-09-21', savedAt: Number.NaN, result: result() }])).toBeNull()
+    expect(
+      lastWrittenAt([{ week: '2026-09-21', savedAt: Number.NaN, result: result(), notes: [] }]),
+    ).toBeNull()
     expect(lastWrittenAt([])).toBeNull()
+  })
+})
+
+describe('归档 · 随手记', () => {
+  function note(text: string, when: Date, id = text) {
+    const created = createNote(text, when.getTime())
+    if (!created) throw new Error('测试里不该建出空的笔记')
+    return { ...created, id }
+  }
+
+  it('往空存档里记一条：那一周就出现了，结果还是空的', () => {
+    const list = addWeekNote([], '2026-09-23', note('想给爸妈打个电话', at(2026, 9, 23)))
+    expect(list).toHaveLength(1)
+    expect(list[0].week).toBe('2026-09-23')
+    expect(list[0].notes.map((n) => n.text)).toEqual(['想给爸妈打个电话'])
+    // 结果还是空的：只有随手记的周不该凭空长出主线
+    expect(list[0].result.highlights).toEqual([])
+    expect(list[0].result.events).toEqual([])
+    expect(mainLine(list[0])).toBe('')
+  })
+
+  it('归到那一天所属的那一周，不是随手记被创建的那一周', () => {
+    // 09-22 是周二，归 09-21 那一周
+    const list = addWeekNote([], '2026-09-21', note('椅子到了', at(2026, 9, 22)))
+    expect(notesOf(list, '2026-09-21').map((n) => n.date)).toEqual(['2026-09-22'])
+  })
+
+  it('同一条记两次只留一份（按 id 覆盖）', () => {
+    const one = note('把报价发出去', at(2026, 9, 22), 'n1')
+    const twice = note('把报价发出去（改了两个字）', at(2026, 9, 23), 'n1')
+    let list = addWeekNote([], '2026-09-21', one, at(2026, 9, 22).getTime())
+    list = addWeekNote(list, '2026-09-21', twice, at(2026, 9, 23).getTime())
+    expect(list[0].notes).toHaveLength(1)
+    expect(list[0].notes[0].text).toBe('把报价发出去（改了两个字）')
+  })
+
+  it('删一条：只删这一周里的那一条，别的周不动', () => {
+    const list = [
+      { ...entry('2026-09-21', {}, at(2026, 9, 21).getTime()), notes: [note('a', at(2026, 9, 21), 'a')] },
+      { ...entry('2026-09-28', {}, at(2026, 9, 28).getTime()), notes: [note('b', at(2026, 9, 28), 'b')] },
+    ]
+    const left = removeWeekNote(list, '2026-09-21', 'a')
+    expect(notesOf(left, '2026-09-21')).toEqual([])
+    expect(left[0].result.highlights).toEqual(['这周被方案拖着'])
+    expect(notesOf(left, '2026-09-28').map((n) => n.text)).toEqual(['b'])
+  })
+
+  it('删不存在的周、不存在的 id，都原样返回', () => {
+    const list = [entry('2026-09-21')]
+    expect(removeWeekNote(list, '2026-01-05', 'a')).toEqual(list)
+    expect(removeWeekNote(list, '2026-09-21', '没有这一条')).toEqual(list)
+  })
+
+  it('记完结果以后，随手记还在', () => {
+    const written = addWeekNote([], '2026-09-21', note('想给爸妈打个电话', at(2026, 9, 22)))
+    const done = archiveResult(written, result(), at(2026, 9, 27).getTime())
+    expect(done[0].notes.map((n) => n.text)).toEqual(['想给爸妈打个电话'])
+    expect(done[0].result.highlights).toEqual(['这周被方案拖着'])
+  })
+
+  it('重新生成结果也不会抹掉随手记', () => {
+    const written = addWeekNote([], '2026-09-21', note('椅子到了', at(2026, 9, 22)))
+    const again = updateWeekResult(
+      written,
+      '2026-09-21',
+      result({ highlights: ['换了一版'] }),
+      at(2026, 9, 28).getTime(),
+    )
+    expect(again[0].notes.map((n) => n.text)).toEqual(['椅子到了'])
+    expect(again[0].result.highlights).toEqual(['换了一版'])
+  })
+
+  it('挪周时随手记跟着走，不会留在原来那一周', () => {
+    const list = addWeekNote([], '2026-09-28', note('周一补记的', at(2026, 9, 29)))
+    const moved = moveWeek(list, '2026-09-28', -1)
+    expect(notesOf(moved, '2026-09-21').map((n) => n.text)).toEqual(['周一补记的'])
+    expect(notesOf(moved, '2026-09-28')).toEqual([])
+  })
+
+  it('只有随手记的一周也留得住，upsertWeek 不会把它挤掉', () => {
+    const list = addWeekNote([], '2026-09-21', note('一件小事', at(2026, 9, 22)))
+    const after = upsertWeek(list, entry('2026-09-28', {}, at(2026, 9, 28).getTime()))
+    expect(notesOf(after, '2026-09-21')).toHaveLength(1)
+  })
+
+  it('没记过的周读出来是空数组，不是 undefined', () => {
+    expect(notesOf([entry('2026-09-21')], '2026-09-21')).toEqual([])
+    expect(notesOf([], '2026-09-21')).toEqual([])
   })
 })

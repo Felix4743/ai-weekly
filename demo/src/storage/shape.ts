@@ -1,14 +1,17 @@
 import {
   createDefaultConfig,
+  createEmptyResult,
   DEFAULT_PERSONA_PRESET,
   type AppConfig,
   type ChatMessage,
+  type Note,
   type PersonaConfig,
   type WeeklyResult,
 } from '../core/types'
 import { ARCHIVE_LIMIT, sortEntries, type WeekEntry } from '../core/archive'
 import { isWeekKey, weekKeyOf, type WeekKey } from '../core/week'
 import { coerceResult } from '../core/parseResult'
+import { coerceNote, NOTES_PER_WEEK_LIMIT } from '../core/notes'
 import { matchPersonaPreset } from '../core/persona'
 
 /**
@@ -93,6 +96,11 @@ export function normalizeSession(raw: unknown): SavedSession | null {
  *
  * 和会话不一样 —— 会话是一份、坏一份等于没有；归档是一串，
  * 里面有一周写坏了不该连累另外几十周。丢掉的条目会在下一次写入时自然消失。
+ *
+ * 0.9.8 起每条多了一个 `notes`（周中随手记）。两个口子都在这儿：
+ * - 老档（0.9.7 及以前）没有这个键 → 空数组，等于「那周没记过」；
+ * - **只有随手记、还没出结果的那一周也要留下** —— 0.9.8 起这是正常的形态，
+ *   结果这时用一份空结果占位，界面上照实说「这一周还没有被梳理过」。
  */
 export function normalizeArchive(raw: unknown): WeekEntry[] {
   if (!Array.isArray(raw)) return []
@@ -102,16 +110,31 @@ export function normalizeArchive(raw: unknown): WeekEntry[] {
     const parsed = item as Partial<WeekEntry>
     if (!isWeekKey(parsed.week)) continue
     const result = coerceResult(parsed.result)
-    if (!result) continue
+    const notes = coerceNotes(parsed.notes)
+    if (!result && notes.length === 0) continue
     out.push({
       week: parsed.week,
       // 不是个正常的数字（缺了、NaN、Infinity）就当下现在写的 —— 排序与「上次记录」都靠它
       savedAt: Number.isFinite(parsed.savedAt) ? (parsed.savedAt as number) : Date.now(),
-      result,
+      result: result ?? createEmptyResult(),
+      notes,
     })
   }
   // 同一周出现两条时留最后一条（文件被手工编辑过才会这样）
   const byWeek = new Map<WeekKey, WeekEntry>()
   for (const item of out) byWeek.set(item.week, item)
   return sortEntries([...byWeek.values()]).slice(0, ARCHIVE_LIMIT)
+}
+
+/** 随手记：认不出来的整条丢，认得出的按时间从早到晚排、超上限丢最老的 */
+function coerceNotes(raw: unknown): Note[] {
+  if (!Array.isArray(raw)) return []
+  const out: Note[] = []
+  for (const item of raw) {
+    const note = coerceNote(item)
+    if (note) out.push(note)
+  }
+  return out
+    .sort((a, b) => a.at - b.at)
+    .slice(Math.max(0, out.length - NOTES_PER_WEEK_LIMIT))
 }

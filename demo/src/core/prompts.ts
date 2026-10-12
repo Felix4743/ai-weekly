@@ -8,6 +8,7 @@ import {
   uncoveredPoints,
 } from './interview'
 import { buildInterviewerSystem } from './persona'
+import { notesForPrompt } from './notes'
 import { LOW_SCORE_MAX, lowScoreItems, scoresLine } from './probe'
 import {
   CONTENT_BLOCKS,
@@ -208,6 +209,30 @@ function missingBlock(state: InterviewState, dim: Dimension): string {
   return `这一块还没聊到的要点：\n${lines.join('\n')}`
 }
 
+/**
+ * 这一周他随手记下的碎片（0.9.8）。
+ *
+ * 只作**线索**：模型知道「这周发生过什么」，开场才落得到实处 —— 否则只能干等他自己想起来。
+ * 但它**不许当成现在的事实念出来**：周三记的「要确认预算」，周五可能已经确认了，
+ * 所以要问「这条现在怎么样了」，而不是当成待办念一遍。
+ *
+ * 笔记也不会变成结果里的条目：只有真的聊到了，才会被写进结果。
+ */
+function notesBlock(ctx: InterviewContext, isVeryFirst: boolean): string {
+  const notes = ctx.notes ?? []
+  if (notes.length === 0) return ''
+  return [
+    `这周他自己随手记了 ${notes.length} 条（不是聊过的内容，是平时记下的碎片）：`,
+    ...notesForPrompt(notes).map((l) => `- ${l}`),
+    '这些只是线索：**不要**把它们当成清单念一遍，也不要当成现在的事实 —— ' +
+      '他记下的是当时的想法，现在什么样还不一定。',
+    isVeryFirst
+      ? '第一句就可以挑其中一两条自然地提一句，或者顺着问「这条后来怎么样了」；' +
+        '哪一条该在哪一块问，你自己判断。'
+      : '（这些在前面已经提过了，这里只作背景，不用再提一遍。）',
+  ].join('\n')
+}
+
 /** 该区块第一次被打开时，让模型给出开场和第一个问题 */
 export function buildOpeningPrompt(
   state: InterviewState,
@@ -221,6 +246,7 @@ export function buildOpeningPrompt(
 
   const isVeryFirst = history.filter((m) => m.role === 'ai').length === 0
   const thisWeek = thisWeekBlock(ctx)
+  const notes = notesBlock(ctx, isVeryFirst)
 
   const head = [`现在要开始聊「${script.label}」这一块。这一块关心的是：${script.hint}。`]
 
@@ -241,6 +267,7 @@ export function buildOpeningPrompt(
   }
 
   if (thisWeek) head.push('', thisWeek)
+  if (notes) head.push('', notes)
 
   // 开场也把前面几栏的记录带上（0.9.5 起）：不然那句「过渡要像聊天」只能靠它硬编
   const earlier = transcriptBlock(history, dim)
@@ -251,7 +278,9 @@ export function buildOpeningPrompt(
     isVeryFirst
       ? thisWeek
         ? '这是接着上次补的第一句话：先用半句话打个招呼，再按上面说的把他这周已经记下的复述一句，然后问今天想补点什么。'
-        : '这是整场采访的第一句话。先用半句话打个招呼，然后自然地开始 —— 别像在念第一题。'
+        : notes
+          ? '这是整场采访的第一句话。先用半句话打个招呼，再按上面说的提一句他随手记下的东西（挑一两条，别念清单），然后自然地开始。'
+          : '这是整场采访的第一句话。先用半句话打个招呼，然后自然地开始 —— 别像在念第一题。'
       : dim === RECONCILE_KEY
         ? '请把上面上周的内容用他当时的说法复述一遍（不要改写、不要编造），然后问他实际落到了哪儿。'
         : '过渡要像聊天：可以提一句他刚才说的（或他打的分）再接上，不要生硬地另起一个话题。',

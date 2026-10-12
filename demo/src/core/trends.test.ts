@@ -25,7 +25,7 @@ const W3: WeekKey = '2026-10-05'
 const W4: WeekKey = '2026-10-12'
 
 function entry(week: WeekKey, result: Partial<WeeklyResult> = {}): WeekEntry {
-  return { week, savedAt: 0, result: { ...createEmptyResult(), ...result } }
+  return { week, savedAt: 0, result: { ...createEmptyResult(), ...result }, notes: [] }
 }
 
 function state(scores: Record<string, number>, note = ''): WeeklyResult['state'] {

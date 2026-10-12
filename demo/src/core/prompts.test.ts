@@ -212,6 +212,53 @@ describe('提示词 · 区块开场与收尾', () => {
     expect(text).not.toContain('接着上次补')
   })
 
+  it('没记过随手记时一个字都不提', () => {
+    const none = textOf(buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA))
+    expect(none).not.toContain('随手记')
+    expect(none).not.toContain('线索')
+  })
+
+  it('有随手记时开场带上它们，但只当线索、不当事实', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA, {
+        notes: [
+          { id: 'n1', at: 1, date: '2026-09-22', text: '跟张总通了电话，预算没谈拢', dim: 'people' },
+          { id: 'n2', at: 2, date: '2026-09-24', text: '椅子到了，坐着腰不疼', dim: 'thing' },
+        ],
+      }),
+    )
+    expect(text).toContain('这周他自己随手记了 2 条')
+    expect(text).toContain('- 9月22日：跟张总通了电话，预算没谈拢')
+    expect(text).toContain('- 9月24日：椅子到了，坐着腰不疼')
+    // 规矩：不许当清单念、不许当成现在的事实
+    expect(text).toContain('不要**把它们当成清单念一遍')
+    expect(text).toContain('现在什么样还不一定')
+    // 只是线索，所以不替模型归类（猜出来的分类只在界面上用）
+    expect(text).not.toContain('9月22日（')
+    expect(text).not.toContain('9月24日（')
+  })
+
+  it('第一块的开场让模型主动挑一两条提起来', () => {
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'event'), 'event', [], PERSONA, {
+        notes: [{ id: 'n1', at: 1, date: '2026-09-22', text: '想给爸妈打个电话', dim: 'people' }],
+      }),
+    )
+    expect(text).toContain('第一句就可以挑其中一两条自然地提一句')
+    expect(text).toContain('这条后来怎么样了')
+  })
+
+  it('后面几块只把随手记当背景，不再提一遍', () => {
+    const history = [msg('ai', '这周主要在忙什么？', 'event'), msg('user', '在改方案', 'event')]
+    const text = textOf(
+      buildOpeningPrompt(openBlock(createInterview(), 'thing'), 'thing', history, PERSONA, {
+        notes: [{ id: 'n1', at: 1, date: '2026-09-22', text: '想给爸妈打个电话', dim: 'people' }],
+      }),
+    )
+    expect(text).toContain('这周他自己随手记了 1 条')
+    expect(text).toContain('这些在前面已经提过了，这里只作背景，不用再提一遍')
+  })
+
   it('聊完时改成收尾，只提下一块的名称，不许替它先问', () => {
     const state = done(
       done(stateWith({}, { hasLastWeek: false, depth: 'mid', active: 'event' }), 'reconcile'),
