@@ -33,7 +33,7 @@ function entry(
   overrides: Partial<WeeklyResult> = {},
   savedAt: number = NOW.getTime(),
 ): WeekEntry {
-  return { week, savedAt, result: result(overrides) }
+  return { week, savedAt, result: result(overrides), notes: [] }
 }
 
 function render(archive: WeekEntry[]) {

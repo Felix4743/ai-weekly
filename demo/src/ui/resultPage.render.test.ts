@@ -618,6 +618,7 @@ describe('把归档用起来（0.9.6）', () => {
       week,
       savedAt: Date.parse(`${week}T20:00:00`),
       result: { ...createEmptyResult(), ...over },
+      notes: [],
     }
   }
 
