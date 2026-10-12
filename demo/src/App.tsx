@@ -49,6 +49,7 @@ import { SetupPage } from './ui/SetupPage'
 import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
 import { HistoryPage } from './ui/HistoryPage'
+import { IconChart, IconGear } from './ui/icons'
 
 type Page = 'setup' | 'chat' | 'result' | 'history'
 type Overlay = { title: string; sub: string } | null
@@ -661,12 +662,14 @@ export default function App() {
         </div>
         <div className="topbar-right">
           {page !== 'setup' && page !== 'history' && (
-            <button className="link-btn" type="button" onClick={openHistory}>
+            <button className="btn ghost sm" type="button" onClick={openHistory}>
+              <IconChart />
               总览
             </button>
           )}
           {page !== 'setup' && (
-            <button className="link-btn" type="button" onClick={openSetup}>
+            <button className="btn ghost sm" type="button" onClick={openSetup}>
+              <IconGear />
               设置
             </button>
           )}

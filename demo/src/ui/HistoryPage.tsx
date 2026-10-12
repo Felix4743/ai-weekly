@@ -33,6 +33,7 @@ import {
 } from '../core/week'
 import type { WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { IconBack, IconCheck, IconChevron, IconCopy, IconSparkle } from './icons'
 import { ResultBody } from './ResultBody'
 
 /**
@@ -167,10 +168,12 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
         <div className="result-actions">
           {!stats.hasThisWeek && (
             <button className="btn primary" type="button" onClick={onStart}>
+              <IconSparkle size={15} />
               聊这周
             </button>
           )}
           <button className="btn ghost" type="button" onClick={onBack}>
+            <IconBack size={15} />
             返回
           </button>
         </div>
@@ -212,7 +215,7 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
               onClick={() => setMonth(shiftMonth(month, -1))}
               aria-label="上个月"
             >
-              ‹
+              <IconChevron size={15} className="chev-prev" />
             </button>
             <span className="cal-month">{monthLabel(month)}</span>
             <button
@@ -221,10 +224,10 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
               onClick={() => setMonth(shiftMonth(month, 1))}
               aria-label="下个月"
             >
-              ›
+              <IconChevron size={15} className="chev-next" />
             </button>
             <button
-              className="link-btn"
+              className="btn ghost sm"
               type="button"
               onClick={() => {
                 setMonth(monthOf(now))
@@ -319,12 +322,14 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
                 >
                   挪到下一周
                 </button>
-                <button className="btn primary" type="button" onClick={copy}>
-                  {copied ? '已复制 ✓' : '复制全文'}
+                <button className="btn ghost" type="button" onClick={copy}>
+                  {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+                  {copied ? '已复制' : '复制全文'}
                 </button>
               </>
             ) : selected === thisWeek ? (
               <button className="btn primary" type="button" onClick={onStart}>
+                <IconSparkle size={15} />
                 现在聊一聊
               </button>
             ) : null}

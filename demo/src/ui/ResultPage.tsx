@@ -15,6 +15,7 @@ import { compareScores, compareText, previousEntry, recurringPatterns } from '..
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
 import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { IconBack, IconChart, IconCheck, IconCopy, IconRefresh } from './icons'
 import { ResultBody } from './ResultBody'
 
 interface Props {
@@ -191,12 +192,15 @@ export function ResultPage({
         </div>
         <div className="result-actions">
           <button className="btn ghost" type="button" onClick={onOpenHistory}>
+            <IconChart size={15} />
             看总览
           </button>
-          <button className="btn primary" type="button" onClick={copy}>
-            {copied ? '已复制 ✓' : '复制全文'}
+          <button className="btn ghost" type="button" onClick={copy}>
+            {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+            {copied ? '已复制' : '复制全文'}
           </button>
           <button className="btn ghost" type="button" onClick={onRestart}>
+            <IconRefresh size={15} />
             再来一次
           </button>
         </div>
@@ -326,7 +330,8 @@ export function ResultPage({
       )}
 
       <div className="footer-actions">
-        <button className="btn ghost" type="button" onClick={onBack}>
+        <button className="btn primary" type="button" onClick={onBack}>
+          <IconBack size={15} />
           回到对话
         </button>
       </div>

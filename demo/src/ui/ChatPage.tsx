@@ -10,6 +10,7 @@ import {
 import { STATE_FIELDS } from '../core/stateFields'
 import type { ChatMessage, Depth, Dimension, InterviewState, StateKey, StateScores } from '../core/types'
 import { StateScore } from './StateScore'
+import { IconSend, IconSkip, IconSparkle, IconWand } from './icons'
 
 interface Props {
   messages: ChatMessage[]
@@ -211,15 +212,32 @@ export function ChatPage({
 
       <section className="stage">
         <header className="stage-head">
-          <span className="stage-title">{script?.label ?? '选一块开始'}</span>
+          <span className="stage-title">
+            {script?.label ?? (showState || showDepth ? '还差一步' : '选一块开始')}
+          </span>
           <span className="stage-hint">{script?.hint ?? ''}</span>
           {activeComplete && <span className="stage-done">这一块聊完了 · 想继续就说</span>}
         </header>
 
         <div className="stage-body" ref={bodyRef}>
-          {!active && !showState && !showDepth && (
-            <p className="block-empty">点上面任意一块，开始聊。</p>
-          )}
+          {!active &&
+            (showState || showDepth ? (
+              /* 上面那张卡才是当前这一步（打分 / 定档）：这里只留一行字，
+                 别让下面挂着一整块什么都没写的白卡（也不放图标，那样会顶出裁切） */
+              <p className="stage-idle">
+                {showState
+                  ? '先给这周打个分，接着就从这里开始聊。'
+                  : '选一个聊到多细，接着就从这里开始问。'}
+              </p>
+            ) : (
+              <div className="stage-empty">
+                <span className="stage-empty-mark" aria-hidden="true">
+                  <IconSparkle size={20} />
+                </span>
+                <p className="block-empty">点上面任意一块，开始聊。</p>
+                <p className="stage-empty-note">一次只聊一块，聊完再换下一块。</p>
+              </div>
+            ))}
 
           {active && blockMessages.length === 0 && !typing && (
             <p className="block-empty">正在准备第一个问题…</p>
@@ -228,7 +246,11 @@ export function ChatPage({
           {blockMessages.map((m) => (
             <div key={m.id} className="msg-block">
               <div className={`msg ${m.role}`}>
-                {m.role === 'ai' && <span className="avatar" aria-hidden="true" />}
+                {m.role === 'ai' && (
+                  <span className="avatar" aria-hidden="true">
+                    <IconSparkle size={15} />
+                  </span>
+                )}
                 <div className="bubble">{m.text}</div>
               </div>
             </div>
@@ -236,14 +258,18 @@ export function ChatPage({
 
           {typing && streamText && (
             <div className="msg ai">
-              <span className="avatar" aria-hidden="true" />
+              <span className="avatar" aria-hidden="true">
+                <IconSparkle size={15} />
+              </span>
               <div className="bubble streaming">{streamText}</div>
             </div>
           )}
 
           {typing && !streamText && (
             <div className="msg ai">
-              <span className="avatar" aria-hidden="true" />
+              <span className="avatar" aria-hidden="true">
+                <IconSparkle size={15} />
+              </span>
               <div className="bubble typing">
                 <i />
                 <i />
@@ -273,10 +299,13 @@ export function ChatPage({
         )}
         {active && !activeComplete && draft.length === 0 && sampleText && !busy && (
           <button className="sample-btn" type="button" onClick={() => setDraft(sampleText)}>
-            ✎ 填入示例回答
+            <IconWand size={14} />
+            填入示例回答
           </button>
         )}
 
+        {/* 输入框与按钮同在一个描边容器里：这一屏谁是主角一眼看得出来 */}
+        <div className="composer-bar">
         {/* 主问题聊完了输入框也留着：想接着说是用户的事，不是脚本的事 */}
         {active && (
           <textarea
@@ -307,6 +336,7 @@ export function ChatPage({
               disabled={!draft.trim() || busy}
               onClick={submit}
             >
+              <IconSend />
               发送
             </button>
           )}
@@ -316,12 +346,13 @@ export function ChatPage({
               typing 时也灰掉：App 那边本来就挡着（busyRef），按钮看着能点却没反应最坑 */}
           {active && !activeComplete && (
             <button
-              className="btn subtle"
+              className="btn ghost"
               type="button"
               disabled={busy || typing}
               title="这题没什么可说的，直接问下一题"
               onClick={onSkip}
             >
+              <IconSkip />
               这题跳过
             </button>
           )}
@@ -341,42 +372,47 @@ export function ChatPage({
             <span className="idle-hint">四块都聊完了</span>
           )}
 
+          {/* 这一屏真正的出口：还没聊完时是墨色实心，四块都聊完了转成主色 */}
           <button
-            className={`btn generate${allDone ? ' primary' : ''}`}
+            className={`btn generate${allDone ? ' primary' : ' ink'}`}
             type="button"
             disabled={!hasAnyAnswer || busy}
             onClick={onGenerate}
           >
+            <IconSparkle />
             生成我的本周梳理
           </button>
         </div>
+        </div>
 
-        {/* 发送下面：不用回到顶部，随时换一块聊 */}
-        <div className="quick-jumps">
-          <span className="quick-jumps-label">{active ? '换个话题' : '从哪一块开始'}</span>
-          {otherBlocks.map((d) => (
+        <div className="composer-foot">
+          {/* 发送下面：不用回到顶部，随时换一块聊 */}
+          <div className="quick-jumps">
+            <span className="quick-jumps-label">{active ? '换个话题' : '从哪一块开始'}</span>
+            {otherBlocks.map((d) => (
+              <button
+                key={d.key}
+                className="btn chip"
+                type="button"
+                disabled={busy}
+                onClick={() => onOpenBlock(d.key)}
+              >
+                聊一聊{d.label}
+              </button>
+            ))}
+            {/* 一周里聊第二次是常态：默认接着上次补，想推倒重来说一声 */}
             <button
-              key={d.key}
               className="btn chip"
               type="button"
               disabled={busy}
-              onClick={() => onOpenBlock(d.key)}
+              onClick={onStartFresh}
             >
-              聊一聊{d.label}
+              从头再聊一遍
             </button>
-          ))}
-          {/* 一周里聊第二次是常态：默认接着上次补，想推倒重来说一声 */}
-          <button
-            className="btn chip"
-            type="button"
-            disabled={busy}
-            onClick={onStartFresh}
-          >
-            从头再聊一遍
-          </button>
-        </div>
+          </div>
 
-        {active && <div className="composer-note">Enter 发送 · Shift + Enter 换行</div>}
+          {active && <div className="composer-note">Enter 发送 · Shift + Enter 换行</div>}
+        </div>
       </div>
     </main>
   )

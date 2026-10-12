@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { sectionDomId, type SectionKey } from '../core/outline'
+import { IconChevron } from './icons'
 
 /**
  * 可以折叠的清单卡片。
@@ -91,6 +92,7 @@ export function CollapsibleCard({
         {count > 0 && <span className="card-count">{count}</span>}
         <span className="card-toggle" aria-hidden="true">
           {collapsed ? '展开' : '收起'}
+          <IconChevron size={15} />
         </span>
       </button>
 

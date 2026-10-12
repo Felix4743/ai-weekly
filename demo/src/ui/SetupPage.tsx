@@ -7,6 +7,7 @@ import {
 } from '../core/persona'
 import { createDefaultConfig, type AppConfig, type PersonaPresetId } from '../core/types'
 import { loadSession } from '../storage/localStore'
+import { IconBack, IconChart, IconCheck, IconRefresh, IconSparkle } from './icons'
 
 interface Props {
   config: AppConfig
@@ -91,6 +92,11 @@ export function SetupPage({ config, ongoing, onSubmit, onRestore, onBackToChat }
           )}
         </div>
 
+        <h2 className="setup-section-title">模型接口</h2>
+        <p className="setup-section-desc">
+          填了就用真实模型，不填就一直是演示模式。这三项只存在本机，随时能回来改。
+        </p>
+
         <label className="field">
           <span className="field-label">API Key</span>
           <input
@@ -143,6 +149,7 @@ export function SetupPage({ config, ongoing, onSubmit, onRestore, onBackToChat }
               >
                 <span className="persona-preset-label">{preset.label}</span>
                 <span className="persona-preset-blurb">{preset.blurb}</span>
+                {activePreset === preset.id && <IconCheck className="preset-check" size={15} />}
               </button>
             ))}
           </div>
@@ -175,10 +182,21 @@ export function SetupPage({ config, ongoing, onSubmit, onRestore, onBackToChat }
 
         <div className="setup-actions">
           <button className="btn primary" type="button" onClick={submit}>
-            {ongoing ? '保存设置，回到对话' : '开始梳理这一周'}
+            {ongoing ? (
+              <>
+                <IconCheck />
+                保存设置，回到对话
+              </>
+            ) : (
+              <>
+                <IconSparkle />
+                开始梳理这一周
+              </>
+            )}
           </button>
           {ongoing && (
             <button className="btn ghost" type="button" onClick={onBackToChat}>
+              <IconBack />
               不保存，返回
             </button>
           )}
@@ -191,11 +209,13 @@ export function SetupPage({ config, ongoing, onSubmit, onRestore, onBackToChat }
                 setDraft(createDefaultConfig())
               }}
             >
+              <IconRefresh />
               恢复默认
             </button>
           )}
           {hasSession && !ongoing && (
             <button className="btn ghost" type="button" onClick={onRestore}>
+              <IconChart />
               查看上次的结果
             </button>
           )}

@@ -344,6 +344,16 @@ async function main() {
 
   await snap(client, '空闲（开场状态卡）')
 
+  /**
+   * `--shot <目录>` 会顺手把与结果页无关的几屏也留一张（开场状态卡、设置页、对话页）。
+   *
+   * 为什么：结果页那几张是 0.9.6 加的，只有那一页有截屏；改界面时其余三页反而只能靠脑补。
+   * 设置页那一下放在**整个流程最后**才走 —— 早走会把后面的步骤带偏（进设置等于换了一页）。
+   */
+  if (SHOT) {
+    await shot(client, 'chat-state-card')
+  }
+
   if (WALK > 0) {
     // 交状态卡：给两项低分，好让「状态追问」那一步真的出现
     await click(client, '.state-card .star', 1) // 心情 2 星
@@ -362,6 +372,11 @@ async function main() {
       if (!ok) break
       await settle(client)
       await snap(client, `第 ${i} 轮回答之后`)
+    }
+
+    if (SHOT) {
+      await scrollShot(client, '.bubble', 'chat-top')
+      await scrollShot(client, '.composer', 'chat-bottom')
     }
   }
 
@@ -432,6 +447,31 @@ async function main() {
         await shot(client, 'history')
         await snap(client, '总览页')
       }
+    }
+  }
+
+  // 设置页：进得去也要出得来（点「不保存，返回」原路回去），截完就走，免得干扰上面的时点表
+  if (SHOT) {
+    const toSetup = await evaluate(
+      client,
+      `const b = [...document.querySelectorAll('.topbar-right button, .topbar-right .btn')]
+         .find((x) => x.textContent.includes('设置'))
+       if (!b) return false
+       b.click()
+       return true`,
+    )
+    if (toSetup) {
+      await settle(client)
+      await sleep(300)
+      await shot(client, 'setup')
+      await evaluate(
+        client,
+        `const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('不保存'))
+         if (!b) return false
+         b.click()
+         return true`,
+      )
+      await sleep(300)
     }
   }
 
