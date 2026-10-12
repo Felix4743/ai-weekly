@@ -14,7 +14,7 @@
 | 目录 | 是什么 |
 |---|---|
 | `README.md` | 就是这份说明 |
-| ~~`ai-weekly/`~~ | **已搬走**：2026-10-10 移到 **`D:\AI周报\`**（装好的应用本体，点开就能用；不是源码，本来也不进版本库）。**现在装的是 0.9.5**（2026-10-10 用 `ai-weekly-0.9.5-setup.exe` 就地覆盖，静默参数 `/S /D=D:\AI周报`）。搬出去是因为它原先落在工作区里，会被 DSH 的沙箱打上 Low 完整性标签，导致 `AI周报.exe` 打不开 |
+| ~~`ai-weekly/`~~ | **已搬走**：2026-10-10 移到 **`D:\AI周报\`**（装好的应用本体，点开就能用；不是源码，本来也不进版本库）。**现在装的是 0.9.6**（2026-10-12 用 `ai-weekly-0.9.6-setup.exe` 就地覆盖，静默参数 `/S /D=D:\AI周报`）。搬出去是因为它原先落在工作区里，会被 DSH 的沙箱打上 Low 完整性标签，导致 `AI周报.exe` 打不开 |
 
 > 新版就装在 `D:\AI周报\`，**不要再往本目录装**。
 
@@ -63,8 +63,8 @@ git checkout mvp-v0.8                  # 整棵树切到那一版（看完切回
 截屏在 `demo/live-output/trends/`（该目录 gitignore）。
 
 这一版没动的东西：归档格式、结果文件（`WeeklyResult` 九个键）、导出章节顺序、三档深度的分钟数与追问上限、
-状态追问的阈值、一周两次接着补的合并规则。**也还没打安装包、还没装机、还没推 GitHub** ——
-所以上面那张装机表与下面「装机实测」那一段都还停在 0.9.5，等真装了再改。
+状态追问的阈值、一周两次接着补的合并规则。**已经打包并装到 `D:\AI周报\` 了**（装机实测见下面那一节）；
+**代码与文档还没推 GitHub**（当前远端 `main-081` 停在 0.9.5 之后的 `9bb47ba`）。
 
 ## 0.9.5 是什么（0.9.6 之前那一版）
 
@@ -229,9 +229,9 @@ tag 是权威版本：能 checkout、能 diff、能回滚。**不再往本目录
 `npm run dist` 出来的安装包在 `demo\release\`（`ai-weekly-<版本>-setup.exe`，约 107 MB），
 免安装版在 `demo\release\win-unpacked\`。那些都是构建产物，永远不进版本库。
 
-**旧安装包已经清掉了**（每个 106.9 MB，五个版本堆在一起就是 534 MB）：现在留着三个 ——
-`ai-weekly-0.9.5-setup.exe`（本机 `D:\AI周报` 里装的就是它）、`ai-weekly-0.9.3-setup.exe` 和
-`ai-weekly-0.9.0-setup.exe`（上面那条回退路要用它）。
+**旧安装包已经清掉了**（每个 106.9 MB，五个版本堆在一起就是 534 MB）：现在留着四个 ——
+`ai-weekly-0.9.6-setup.exe`（当前版，本机 `D:\AI周报` 里装的就是它）、`ai-weekly-0.9.5-setup.exe`、
+`ai-weekly-0.9.3-setup.exe` 和 `ai-weekly-0.9.0-setup.exe`（上面那条回退路要用它）。
 0.8.1 / 0.9.1 / 0.9.2 的安装包，连同其余 `.blockmap`，都删了 —— 这个工具没有自动更新，
 blockmap 只是 electron-updater 用来做差分下载的，放在这里纯属白占。
 **任何一个版本都能从自己的 tag 重建**，不必留着一份二进制：
@@ -253,6 +253,15 @@ npm run dist                 # 重建它的安装包，落在 demo\release\
 perMachine=false 所以不问 UAC），装完 `AI周报.exe` 的版本号会跟着变；**但安装程序会把整个卸载键重写一遍，
 `InstallLocation` 不在它的写入清单里、会被丢掉，要手动补回来**：
 `reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\67abd1ae-81be-5c1f-bf9a-44baed2e9a78" /v InstallLocation /t REG_SZ /d "D:\AI周报" /f`。
+**0.9.6 实测（2026-10-12）**：同一条命令升级（退出码 0），装完卸载项里 `DisplayName` = 「AI周报 0.9.6」、
+`AI周报.exe` 的 `FileVersion` = 0.9.6，`InstallLocation` **照旧被丢掉、又补了一次**（这条不是 0.9.5 的一次性意外）。
+打包那一步的坑也还在：**先把 `demo\dist` 与 `demo\dist-electron` 从 PowerShell 删掉再 `npm run dist`**
+（工作区里的 Node 删不掉它们、`emptyOutDir` 因此不生效、`check:dist` 会拦下来）。
+装完直接拿装机版验了一遍：
+`node scripts/measure-memory.mjs --packaged --result --seed "%APPDATA%/ai-weekly/weeks.json" --shot live-output/installed-096`
+—— 区块顺序里「反复出现」就在「未办」与「状态」之间，页头概览与状态卡都写出「上周 1 ↑1」，
+真实三周归档里的三组重复照旧认出来；截屏在 `demo/live-output/installed-096/`（该目录 gitignore）。
+升级前照例把 `%APPDATA%\ai-weekly\` 三个 json 备份到桌面。
 **0.8.1 → 0.9.3 都不改归档格式**：旧周的 `result` 读回来只是多补一个空的 `state` 栏（分数那一格没有就是不写），
 0.9.3 起再把状态四行文字并成一行备注、补一个空的 `growth` 列表，内容一条都不动；
 真正改格式的是 0.9.0 那条支线（见上），已经退回来了。
