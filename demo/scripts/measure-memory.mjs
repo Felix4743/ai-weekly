@@ -104,10 +104,25 @@ if (!command) {
 }
 const launchArgs = PACKAGED ? [] : ['.']
 
-const child = spawn(command, [...launchArgs, `--remote-debugging-port=${PORT}`], {
-  stdio: ['ignore', 'pipe', 'pipe'],
-  env,
-})
+/**
+ * 拉起应用。
+ *
+ * 平时用管道收着它的输出（出问题时有东西可看）；但在**被沙箱管住的终端**里
+ * 子进程开不了命名管道，`spawn` 会直接抛 `EPERM`。Electron 的输出不看也不影响
+ * 这脚本的结论，所以这时候退成 `inherit`（输出直接进当前终端）再来一次。
+ */
+function launch(command, args, env) {
+  const options = { env }
+  try {
+    return spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (err) {
+    if (err?.code !== 'EPERM') throw err
+    process.stdout.write('（开不了管道，改成继承输出启动）\n')
+    return spawn(command, args, { ...options, stdio: 'inherit' })
+  }
+}
+
+const child = launch(command, [...launchArgs, `--remote-debugging-port=${PORT}`], env)
 
 let ws
 async function cleanup(code) {
@@ -204,7 +219,8 @@ const PROBE = `
     bubbles: document.querySelectorAll('.bubble').length,
     label: document.querySelector('.stage-title')?.textContent ?? '',
     page: document.querySelector('.page')?.className ?? '(没有 .page)',
-    starsOn: document.querySelectorAll('.star.on').length,
+    // 0.9.8：亮的颗数改从 aria-checked 上数（原来那个 .star.on 已经不在了；每排最多一颗选中）
+    starsOn: document.querySelectorAll('.peek-rating__star[aria-checked="true"]').length,
     // 最后一条 AI 气泡 = 当前这道题；用来验证「跳过一下，题是不是真的换了一道」
     question: (() => {
       const bubbles = [...document.querySelectorAll('.bubble')]
@@ -271,7 +287,8 @@ async function waitForApp(client, timeoutMs = 30_000) {
   return false
 }
 
-/** 点一下 selector 选中的元素 */async function click(client, selector, index = 0) {
+/** 点一下 selector 选中的元素 */
+async function click(client, selector, index = 0) {
   return evaluate(
     client,
     `const els = [...document.querySelectorAll(${JSON.stringify(selector)})]
@@ -279,6 +296,42 @@ async function waitForApp(client, timeoutMs = 30_000) {
      els[${index}].click()
      return true`,
   )
+}
+
+/**
+ * 点状态卡里某一排（心情 / 睡眠 / 运动 / 饮食）的第 n 颗星。
+ *
+ * 0.9.8 起那排星在 `PeekRating` 里面，class 从 `.star` 换成了
+ * `.peek-rating__star`，而且四排各自嵌套一层 —— 原来那种
+ * `.state-card .star` 按**全局下标**数（1 = 心情第二颗、6 = 睡眠第二颗、
+ * 11 = 运动第一颗）的写法已经指不准了。所以这里按「哪一排的第几颗」来点，
+ * 排是按 `.state-label` 的中文名找的 —— 太窄的窗口下标签会长出括号备注，
+ * 所以用「包含」而不是「等于」。
+ */
+async function clickStateStar(client, rowLabel, starIndex) {
+  return evaluate(
+    client,
+    `const label = [...document.querySelectorAll('.state-row .state-label')]
+       .find((el) => el.textContent.includes(${JSON.stringify(rowLabel)}))
+     const buttons = label
+       ? [...label.parentElement.querySelectorAll('.peek-rating__star')]
+       : []
+     if (!buttons[${starIndex}]) return false
+     buttons[${starIndex}].click()
+     return true`,
+  )
+}
+
+/**
+ * 往当前焦点上敲一个键（截图用：键盘是那排星正经支持的一条路）。
+ *
+ * 走 CDP 的 `Input.dispatchKeyEvent` 而不是 `el.dispatchEvent` —— 后者造出来的
+ * 事件 `isTrusted` 是 false，React 那层收不到。
+ */
+async function press(client, key) {
+  const common = { key, code: key, windowsVirtualKeyCode: key === 'Backspace' ? 8 : 39, nativeVirtualKeyCode: key === 'Backspace' ? 8 : 39 }
+  await client.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
+  await client.send('Input.dispatchKeyEvent', { type: 'keyUp', ...common })
 }
 
 /**
@@ -352,13 +405,49 @@ async function main() {
    */
   if (SHOT) {
     await shot(client, 'chat-state-card')
+    /**
+     * 再留一张「打过分的」——0.9.8 那排星换成 PeekRating 之后，光是「没打分」那一张
+     * 看不出亮起来是什么样。这里用**键盘**打分：合成的 pointer 事件在 CDP 下不生效
+     * （`pointerType` 不是 `mouse`），而方向键是组件正经支持的一条路。
+     */
+    // 键盘事件打给**焦点**，而 `el.click()` 不给焦点，所以先真点一下、再把焦点按上去
+    const rated = await click(client, '.state-card .state-row .peek-rating__star', 0)
+    if (rated) {
+      await evaluate(
+        client,
+        `const star = document.querySelector('.state-card .state-row .peek-rating__star')
+         if (!star) return false
+         star.focus()
+         return document.activeElement === star`,
+      )
+      // 键盘事件是打进**焦点**的，先确认焦点真落在第一颗星上，再敲
+      const focused = await evaluate(
+        client,
+        `return document.activeElement?.className ?? ''`,
+      )
+      process.stdout.write(`（键盘打分前焦点在：${focused}）\n`)
+      await press(client, 'ArrowRight')
+      await press(client, 'ArrowRight')
+      await press(client, 'ArrowRight')
+      await sleep(200)
+      const checked = await evaluate(
+        client,
+        `return document.querySelectorAll('.peek-rating__star[aria-checked="true"]').length`,
+      )
+      process.stdout.write(`（敲了三下方向键，选中的颗数：${checked}）\n`)
+      await shot(client, 'chat-state-card-rated')
+      await press(client, 'Backspace') // 评回「没打分」，别影响后面几步
+      await sleep(200)
+    } else {
+      process.stdout.write('（第一颗星没点到，跳过「打过分」那张）\n')
+    }
   }
 
   if (WALK > 0) {
     // 交状态卡：给两项低分，好让「状态追问」那一步真的出现
-    await click(client, '.state-card .star', 1) // 心情 2 星
-    await click(client, '.state-card .star', 6) // 睡眠 2 星
-    await click(client, '.state-card .star', 11) // 运动 1 星
+    await clickStateStar(client, '心情', 1) // 心情 2 星
+    await clickStateStar(client, '睡眠', 1) // 睡眠 2 星
+    await clickStateStar(client, '运动', 0) // 运动 1 星
     await sleep(300)
     await snap(client, '点完三颗低分星')
     await click(client, '.state-card .btn.primary')
@@ -387,7 +476,7 @@ async function main() {
    * 正是这一版加的东西，所以拿真实界面验一次 —— 跟 smoke 的理由一样。
    */
   if (SKIP > 0) {
-    await click(client, '.state-card .star', 6) // 睡眠 2 星 → 让状态追问出现
+    await clickStateStar(client, '睡眠', 1) // 睡眠 2 星 → 让状态追问出现
     await sleep(200)
     await click(client, '.state-card .btn.primary')
     await sleep(400)
@@ -410,7 +499,7 @@ async function main() {
 
   if (WANT_RESULT) {
     // 交卡（给一项低分，好让状态追问也走一遍）→ 定档 → 说一句 → 生成
-    await click(client, '.state-card .star', 6) // 睡眠 2 星
+    await clickStateStar(client, '睡眠', 1) // 睡眠 2 星
     await sleep(200)
     await click(client, '.state-card .btn.primary')
     await sleep(400)
