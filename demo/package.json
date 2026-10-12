@@ -1,7 +1,7 @@
 {
   "name": "ai-weekly",
   "private": true,
-  "version": "0.9.6",
+  "version": "0.9.7",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "description": "AI 周报 —— 采访式个人周复盘工具（状态打分卡 · 按打分追问低分项 · 跳过没感觉的题 · 成长 · 三档深度 · 一周两次接着补）",
