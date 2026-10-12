@@ -11,6 +11,7 @@ import {
 } from '../core/archive'
 import { resultToMarkdown } from '../core/resultText'
 import { stampText, timeAgo } from '../core/recency'
+import { compareScores, previousEntry, recurringPatterns } from '../core/trends'
 import {
   WEEKDAY_NAMES,
   addWeeks,
@@ -80,6 +81,12 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
   const entry = findEntry(archive, selected)
   const relation = weekRelation(selected, now)
   const weeks = useMemo(() => weeksInMonth(month), [month])
+  /** 反复出现与上周对比都按「选中那一周」算 —— 看旧周时不该拿后来的周说事 */
+  const patterns = useMemo(() => recurringPatterns(archive, selected), [archive, selected])
+  const comparison = useMemo(
+    () => compareScores(entry?.result.state.scores, previousEntry(archive, selected), selected),
+    [archive, entry, selected],
+  )
 
   const select = useCallback((week: WeekKey) => setSelected(week), [])
 
@@ -335,6 +342,8 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
               onResultChange={editResult}
               collapsed={collapsed}
               onToggle={toggleCollapsed}
+              compare={comparison}
+              patterns={patterns}
             />
           </>
         ) : (

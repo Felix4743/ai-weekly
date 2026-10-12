@@ -28,10 +28,10 @@ function base(): WeeklyResult {
 }
 
 describe('结果页目录', () => {
-  it('按固定顺序列出八块，文案和页面标题一致', () => {
+  it('按固定顺序列出九块，文案和页面标题一致', () => {
     const outline = buildOutline(base())
     expect(outline.map((e) => e.key)).toEqual(SECTION_KEYS)
-    // 0.9.5 重排：主线与计划在最前，六张清单卡按原来的先后跟在后面
+    // 0.9.5 重排：主线与计划在最前；0.9.6 在未办后面插了「反复出现」
     expect(outline.map((e) => e.label)).toEqual([
       '本周主线',
       '下周计划',
@@ -39,29 +39,41 @@ describe('结果页目录', () => {
       '人际',
       '物品',
       '未办',
+      '反复出现',
       '状态',
       '成长',
     ])
   })
 
-  it('主线与计划在最前，六张清单卡退到后面', () => {
+  it('主线与计划在最前，几张清单卡退到后面', () => {
     const keys = buildOutline(base()).map((e) => e.key)
     expect(keys.slice(0, 2)).toEqual(['highlights', 'plan'])
     expect(keys.indexOf('events')).toBeGreaterThan(keys.indexOf('plan'))
-    // 清单卡之间的相对顺序没动
-    expect(keys.indexOf('state')).toBeGreaterThan(keys.indexOf('pending'))
+    // 清单卡之间的相对顺序：未办 → 反复出现 → 状态 → 成长
+    expect(keys.indexOf('pending')).toBeLessThan(keys.indexOf('pattern'))
+    expect(keys.indexOf('pattern')).toBeLessThan(keys.indexOf('state'))
     expect(keys.indexOf('growth')).toBeGreaterThan(keys.indexOf('state'))
   })
 
   it('每一块都带上自己的条数', () => {
     const outline = buildOutline(base())
-    expect(outline.map((e) => e.count)).toEqual([1, 4, 2, 1, 1, 1, 3, 1])
+    // 反复出现那一栏默认 0：它的条数来自归档，不在这份结果里
+    expect(outline.map((e) => e.count)).toEqual([1, 4, 2, 1, 1, 1, 0, 3, 1])
   })
 
   it('空结果时条数全是 0，但目录项一个都不少', () => {
     const outline = buildOutline(createEmptyResult())
-    expect(outline).toHaveLength(8)
+    expect(outline).toHaveLength(9)
     expect(outline.every((e) => e.count === 0)).toBe(true)
+  })
+
+  // 0.9.6：那一条的条数是「归档里跨周重复了几组」，由调用方算好传进来
+  it('反复出现的条数由归档算出来，不写进结果文件', () => {
+    expect(countSection(createEmptyResult(), 'pattern')).toBe(0)
+    expect(countSection(base(), 'pattern', 3)).toBe(3)
+    const outline = buildOutline(base(), 3)
+    expect(outline).toHaveLength(9)
+    expect(outline.map((e) => e.count)).toEqual([1, 4, 2, 1, 1, 1, 3, 3, 1])
   })
 
   it('状态一项分没点、备注也空着时算 0 条', () => {
@@ -104,7 +116,7 @@ describe('结果页目录', () => {
 
   it('锚点 id 稳定，能被页面直接引用', () => {
     expect(sectionDomId('things')).toBe('section-things')
-    // 0.9.5 起重排：本周主线与下周计划在最前（顺序即页面顺序，见 outline.ts 的注释）
+    // 0.9.5 起重排、0.9.6 插入反复出现（顺序即页面顺序，见 outline.ts 的注释）
     expect(SECTION_KEYS.map(sectionDomId)).toEqual([
       'section-highlights',
       'section-plan',
@@ -112,18 +124,20 @@ describe('结果页目录', () => {
       'section-people',
       'section-things',
       'section-pending',
+      'section-pattern',
       'section-state',
       'section-growth',
     ])
   })
 
-  it('0.9.5：目录里主线与计划排在最前，六张清单卡退到后面', () => {
+  it('0.9.5：目录里主线与计划排在最前，清单卡退到后面', () => {
     expect(SECTION_KEYS.slice(0, 2)).toEqual(['highlights', 'plan'])
     expect(SECTION_KEYS.slice(2)).toEqual([
       'events',
       'people',
       'things',
       'pending',
+      'pattern',
       'state',
       'growth',
     ])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { mainLineOf } from '../core/archive'
+import { mainLineOf, type WeekEntry } from '../core/archive'
 import { resultToMarkdown } from '../core/resultText'
 import {
   SECTION_KEYS,
@@ -11,6 +11,7 @@ import {
 } from '../core/outline'
 import { SCORE_MAX, scoreText } from '../core/stateScore'
 import { STATE_FIELDS } from '../core/stateFields'
+import { compareScores, compareText, previousEntry, recurringPatterns } from '../core/trends'
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
 import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
@@ -18,6 +19,8 @@ import { ResultBody } from './ResultBody'
 
 interface Props {
   result: WeeklyResult
+  /** 归档：跟上一周比、算「反复出现」都从这儿读，只读不写 */
+  archive: WeekEntry[]
   messages: ChatMessage[]
   restored: boolean
   refining: boolean
@@ -32,6 +35,7 @@ interface Props {
 
 export function ResultPage({
   result,
+  archive,
   messages,
   restored,
   refining,
@@ -55,7 +59,16 @@ export function ResultPage({
   /** 刚点过目录时钉住的那一项，避免滚动到底后又被判定成最后一块 */
   const pinnedRef = useRef<SectionKey | null>(null)
 
-  const outline = useMemo(() => buildOutline(result), [result])
+  /** 跨周反复出现的东西（core/trends.ts）：只读归档，算错最多是少显示一条 */
+  const patterns = useMemo(() => recurringPatterns(archive, week), [archive, week])
+  /** 跟上次记的那一周比：中间那周没记就往前找，文案也跟着说「上一次」 */
+  const comparison = useMemo(
+    () => compareScores(result.state.scores, previousEntry(archive, week), week),
+    [archive, week, result.state.scores],
+  )
+  /** 状态那几行后面的小字（`上周 3 ↑1`）：按 key 查一次也顺手给页头用 */
+  const beforeByKey = new Map(comparison.rows.map((row) => [row.key, row]))
+  const outline = useMemo(() => buildOutline(result, patterns.length), [result, patterns.length])
   const markdown = resultToMarkdown(result)
   /** 页头那条概览：只列**打过分的**项，一项都没打就写一句「这周没打分」 */
   const scoredFields = STATE_FIELDS.filter((f) => result.state.scores?.[f.key] !== undefined)
@@ -196,24 +209,37 @@ export function ResultPage({
           {scoredFields.length === 0 ? (
             <span className="brief-empty">这周没打分</span>
           ) : (
-            scoredFields.map((f) => (
-              <span key={f.key} className="brief-score">
-                <span className="brief-label">{f.label}</span>
-                <span className="stars" aria-hidden="true">
-                  {Array.from({ length: SCORE_MAX }, (_, i) => (
+            scoredFields.map((f) => {
+              const row = beforeByKey.get(f.key)
+              const before = row ? compareText(row) : ''
+              return (
+                <span key={f.key} className="brief-score">
+                  <span className="brief-label">{f.label}</span>
+                  <span className="stars" aria-hidden="true">
+                    {Array.from({ length: SCORE_MAX }, (_, i) => (
+                      <span
+                        key={i}
+                        className={`star${
+                          i < (result.state.scores?.[f.key] ?? 0) ? ' on' : ''
+                        }`}
+                      >
+                        ★
+                      </span>
+                    ))}
+                  </span>
+                  <span className="brief-value">{scoreText(result.state.scores?.[f.key])}</span>
+                  {/* 一眼看到跟上次比是涨了还是掉了 */}
+                  {before && (
                     <span
-                      key={i}
-                      className={`star${
-                        i < (result.state.scores?.[f.key] ?? 0) ? ' on' : ''
-                      }`}
+                      className="brief-prev"
+                      title={comparison.previousRange ? `上一次记的：${comparison.previousRange}` : undefined}
                     >
-                      ★
+                      {before}
                     </span>
-                  ))}
+                  )}
                 </span>
-                <span className="brief-value">{scoreText(result.state.scores?.[f.key])}</span>
-              </span>
-            ))
+              )
+            })
           )}
         </div>
         <p className="brief-main">
@@ -250,6 +276,8 @@ export function ResultPage({
         onResultChange={onResultChange}
         collapsed={collapsed}
         onToggle={toggleCollapsed}
+        compare={comparison}
+        patterns={patterns}
         planFooter={
           <div className="refine-box">
             <textarea

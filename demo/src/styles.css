@@ -919,6 +919,14 @@ body {
   color: var(--ink-2);
 }
 
+/* 页头上那句「上周 3 ↑1」（0.9.6） */
+.brief-prev {
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .brief-main {
   display: flex;
   align-items: baseline;
@@ -1307,6 +1315,15 @@ body {
   width: 34px;
   font-size: 13px;
   color: var(--ink-3);
+}
+
+/* 状态那一行后面跟的「上周 3 ↑1」（0.9.6）：靠右，不抢星星的位置 */
+.state-prev {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* 状态是常驻可编辑的，不像清单那样点开才编辑：平时不要一直亮着主色 */
@@ -1859,4 +1876,82 @@ body {
 .overlay-sub {
   font-size: 13px;
   color: var(--ink-3);
+}
+
+/* ---------------- 0.9.6：把归档用起来（反复出现） ---------------- */
+
+/* 一条 = 一件事/一个人 + 它在哪几周出现过 */
+.pattern-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pattern-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--panel);
+}
+
+.pattern-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  min-width: 0;
+}
+
+.pattern-tag {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.pattern-text {
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pattern-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pattern-hit {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.pattern-when {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pattern-what {
+  min-width: 0;
+}
+
+.pattern-empty {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
 }

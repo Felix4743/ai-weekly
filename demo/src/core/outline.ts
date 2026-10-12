@@ -2,18 +2,22 @@ import { coerceScore } from './stateScore'
 import { STATE_KEYS, type WeeklyResult } from './types'
 
 /**
- * 结果页的八个区块，**顺序即页面上的先后顺序**。
+ * 结果页的九个区块，**顺序即页面上的先后顺序**。
  *
  * 0.9.5 起重排：本周主线与下周计划搬到最前面。理由是这一页有两个读者时刻 ——
  * 「我就想看看这周到底怎么回事」（主角是主线与下周计划）与「我要动手改某一条」
- * （才需要那六张清单卡）。原来六张卡压在主线前面，最该看第二遍的两句要滚过一屏才出现。
+ * （才需要那几张清单卡）。原来六张卡压在主线前面，最该看第二遍的两句要滚过一屏才出现。
  * 顺序一变，目录栏与滚动高亮都跟着变（它们都从这一个数组读），所以只改这一处。
+ *
+ * 0.9.6 加「反复出现」，插在「未办」与「状态」之间：它讲的就是
+ * 「上几周这些东西一直挂着」，紧跟在未办后面读着最顺。
  */
 export type SectionKey =
   | 'events'
   | 'people'
   | 'things'
   | 'pending'
+  | 'pattern'
   | 'state'
   | 'growth'
   | 'highlights'
@@ -26,6 +30,7 @@ export const SECTION_KEYS: SectionKey[] = [
   'people',
   'things',
   'pending',
+  'pattern',
   'state',
   'growth',
 ]
@@ -35,6 +40,7 @@ const SECTION_LABELS: Record<SectionKey, string> = {
   people: '人际',
   things: '物品',
   pending: '未办',
+  pattern: '反复出现',
   state: '状态',
   growth: '成长',
   highlights: '本周主线',
@@ -54,8 +60,11 @@ export function sectionDomId(key: SectionKey): string {
   return `section-${key}`
 }
 
-/** 某一块现在有多少条内容 */
-export function countSection(result: WeeklyResult, key: SectionKey): number {
+/**
+ * 某一块现在有多少条内容。
+ * @param patterns 「反复出现」那块的条数 —— 它要拿归档才算得出来，所以从外面传进来
+ */
+export function countSection(result: WeeklyResult, key: SectionKey, patterns = 0): number {
   switch (key) {
     case 'events':
       return result.events.length
@@ -65,6 +74,9 @@ export function countSection(result: WeeklyResult, key: SectionKey): number {
       return result.things.length
     case 'pending':
       return result.pending.length
+    // 反复出现：条数是跨周算出来的（见 core/trends.ts），不在这份结果里
+    case 'pattern':
+      return patterns
     // 状态：点了几项分算几条，写了备注或有一段追问小结再加一条。
     // 用 coerceScore 判分而不是 typeof === 'number' —— 界面上的星只认 1–5，
     // 脏值（0 / 6 / 小数）界面上是「未打分」，目录也不该算它一条。
@@ -82,12 +94,12 @@ export function countSection(result: WeeklyResult, key: SectionKey): number {
   }
 }
 
-/** 结果页顶部目录的内容 */
-export function buildOutline(result: WeeklyResult): OutlineEntry[] {
+/** 结果页顶部目录的内容；`patterns` 是「反复出现」那块的条数 */
+export function buildOutline(result: WeeklyResult, patterns = 0): OutlineEntry[] {
   return SECTION_KEYS.map((key) => ({
     key,
     label: SECTION_LABELS[key],
-    count: countSection(result, key),
+    count: countSection(result, key, patterns),
   }))
 }
 

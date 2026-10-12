@@ -722,6 +722,7 @@ export default function App() {
       {page === 'result' && result && (
         <ResultPage
           result={result}
+          archive={archive}
           messages={messages}
           restored={restored}
           refining={overlay !== null}

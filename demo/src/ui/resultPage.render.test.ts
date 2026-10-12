@@ -1,8 +1,10 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import type { WeekEntry } from '../core/archive'
 import { countSection } from '../core/outline'
 import { attachState } from '../core/stateScore'
+import { compareScores, previousEntry, recurringPatterns } from '../core/trends'
 import { createEmptyResult, createEmptyState, type ChatMessage, type WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED } from './CollapsibleCard'
 import { StateScore } from './StateScore'
@@ -27,10 +29,12 @@ const result: WeeklyResult = {
 /** 状态那四项的标签，顺序就是界面上的顺序 */
 const STATE_LABELS = ['心情', '睡眠', '运动', '饮食']
 
-function render(current: WeeklyResult = result) {
+/** 默认不给归档：没有更早的记录时，「上周对比」和「反复出现」都该什么都不显示 */
+function render(current: WeeklyResult = result, archive: WeekEntry[] = []) {
   return renderToStaticMarkup(
     createElement(ResultPage, {
       result: current,
+      archive,
       messages: [] as ChatMessage[],
       restored: false,
       refining: false,
@@ -124,51 +128,59 @@ function bodyTree(current: WeeklyResult, onChange: (next: WeeklyResult) => void 
 describe('结果页渲染（临时校验）', () => {
   it('目录与标题用的是新名字', () => {
     const html = render()
-    for (const label of ['事情', '人际', '物品', '未办', '状态', '成长', '本周主线', '下周计划']) {
+    for (const label of ['事情', '人际', '物品', '未办', '反复出现', '状态', '成长', '本周主线', '下周计划']) {
       expect(html).toContain(label)
     }
     expect(html).not.toContain('悬着')
     expect(html).not.toContain('本周热点')
   })
 
-  it('六栏默认收起：条目不在首屏 HTML 里，且标记为未展开', () => {
+  it('七栏默认收起：条目不在首屏 HTML 里，且标记为未展开', () => {
     const html = render()
     expect(html).not.toContain('改了三版方案')
     expect(html).not.toContain('报销拖了两周')
     expect(html).not.toContain('卡在他那儿')
     expect(html).not.toContain('买了个键盘')
-    // 成长与状态卡也默认收起：里面的条目、星星和备注都不进首屏
+    // 成长、状态、反复出现也默认收起：里面的条目、星星和备注都不进首屏
     expect(html).not.toContain('读完了《长日将尽》')
     expect(html).not.toContain('这周一直悬着')
     expect(html).not.toContain('未打分')
-    expect(html.match(/aria-expanded="false"/g)).toHaveLength(6)
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(7)
     expect(html).toContain('展开')
   })
 
-  it('目录里本周主线与下周计划排在最前（0.9.5 重排）', () => {
+  it('目录里本周主线与下周计划排在最前（0.9.5 重排，0.9.6 加了反复出现）', () => {
     const html = render()
     const nav = html.slice(html.indexOf('outline-bar'), html.indexOf('</nav>'))
     expect(nav.indexOf('本周主线')).toBeGreaterThanOrEqual(0)
     expect(nav.indexOf('本周主线')).toBeLessThan(nav.indexOf('下周计划'))
     expect(nav.indexOf('下周计划')).toBeLessThan(nav.indexOf('事情'))
-    // 六张清单卡之间的相对顺序没动
-    expect(nav.indexOf('未办')).toBeLessThan(nav.indexOf('状态'))
+    // 清单卡之间的相对顺序：未办 → 反复出现 → 状态 → 成长
+    expect(nav.indexOf('未办')).toBeLessThan(nav.indexOf('反复出现'))
+    expect(nav.indexOf('反复出现')).toBeLessThan(nav.indexOf('状态'))
     expect(nav.indexOf('状态')).toBeLessThan(nav.indexOf('成长'))
   })
 
-  it('页面上的顺序跟着目录走：主线与计划在六张卡之前', () => {
+  it('页面上的顺序跟着目录走：主线与计划在几张卡之前', () => {
     const html = render()
-    const highlights = html.indexOf('id="section-highlights"')
-    const plan = html.indexOf('id="section-plan"')
-    const events = html.indexOf('id="section-events"')
-    const pending = html.indexOf('id="section-pending"')
-    const state = html.indexOf('id="section-state"')
-    const growth = html.indexOf('id="section-growth"')
-    expect(highlights).toBeGreaterThanOrEqual(0)
+    const at = (key: string) => {
+      const index = html.indexOf(`id="section-${key}"`)
+      expect(index).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    const highlights = at('highlights')
+    const plan = at('plan')
+    const events = at('events')
+    const pending = at('pending')
+    const pattern = at('pattern')
+    const state = at('state')
+    const growth = at('growth')
     expect(highlights).toBeLessThan(plan)
     expect(plan).toBeLessThan(events)
     expect(events).toBeLessThan(pending)
-    expect(pending).toBeLessThan(state)
+    // 反复出现讲的就是「上几周这些东西一直挂着」，紧跟在未办后面
+    expect(pending).toBeLessThan(pattern)
+    expect(pattern).toBeLessThan(state)
     expect(state).toBeLessThan(growth)
   })
 
@@ -558,5 +570,121 @@ describe('结果页页头概览', () => {
       }),
     )
     expect(html).not.toContain('result-brief')
+  })
+})
+
+/**
+ * 0.9.6：把归档用起来。
+ *
+ * 两件事都只读 weeks.json —— 状态那四行后面挂一句「上周 3 ↑1」，
+ * 以及「未办」后面多出来的那一栏「反复出现」（跨周重复的未办/计划/人名）。
+ * 这一页的结果记在 2026-09-21 那一周，上一周是 2026-09-14。
+ */
+describe('把归档用起来（0.9.6）', () => {
+  const WEEK = '2026-09-21'
+  const LAST = '2026-09-14'
+
+  function entry(week: string, over: Partial<WeeklyResult> = {}): WeekEntry {
+    return {
+      week,
+      savedAt: Date.parse(`${week}T20:00:00`),
+      result: { ...createEmptyResult(), ...over },
+    }
+  }
+
+  /** 上一周：心情 3、睡眠 4（这一周是 4 和 2 —— 一个涨了、一个掉了） */
+  const lastWeek = entry(LAST, { state: attachState({ mood: 3, sleep: 4 }, '上周还行') })
+
+  /** 跨两周挂着的一件事 */
+  const stale = [
+    entry('2026-08-31', { nextFocus: ['把报价发出去'] }),
+    entry('2026-09-07', { pending: ['报价还是没发出去'] }),
+  ]
+
+  /** 展开「状态」与「反复出现」两栏，把算好的对比与重复模式交给 ResultBody 渲染 */
+  const renderOpen = (current: WeeklyResult, archive: WeekEntry[]) =>
+    renderToStaticMarkup(
+      createElement(ResultBody, {
+        result: current,
+        onResultChange: () => {},
+        collapsed: { ...ALL_COLLAPSED, state: false, pattern: false },
+        onToggle: () => {},
+        compare: compareScores(current.state.scores, previousEntry(archive, WEEK), WEEK),
+        patterns: recurringPatterns(archive, WEEK),
+      }),
+    )
+
+  it('状态那几行后面挂一句跟上次比：涨了、掉了各说各的', () => {
+    const html = renderOpen(result, [lastWeek])
+    expect(html.match(/class="state-prev"/g)).toHaveLength(2)
+    // 心情 4 比上周 3 涨 1；睡眠 2 比上周 4 掉 2
+    expect(html).toContain('上周 3 ↑1')
+    expect(html).toContain('上周 4 ↓2')
+    // 这一周没打分的两项后面不挂小字（整页里只有两处 state-prev）
+    const sport = html.slice(html.indexOf('state-label">运动'), html.indexOf('state-label">饮食'))
+    expect(sport).not.toContain('state-prev')
+    expect(html).not.toContain('上周没打分')
+  })
+
+  it('上次那周没打分时照实说「上周没打分」', () => {
+    const blank = entry(LAST, { state: createEmptyState() })
+    const html = renderOpen(result, [blank])
+    expect(html.match(/class="state-prev"/g)).toHaveLength(2)
+    expect(html.match(/上周没打分/g)).toHaveLength(2)
+  })
+
+  it('归档里没有更早的一周时，这一句一句都不多说', () => {
+    const html = renderOpen(result, [])
+    expect(html).not.toContain('state-prev')
+    expect(html).not.toContain('上周')
+    // 反复出现那一栏还在，只是写着「还没看出重复」
+    expect(html).toContain('还没看出重复')
+    expect(html).not.toContain('pattern-item')
+  })
+
+  it('反复出现那一栏：一条一件事，按周列出，说清挂了几周', () => {
+    const html = renderOpen(result, stale)
+    expect(html).toContain('2 周都挂着')
+    expect(html).toContain('把报价发出去')
+    expect(html).toContain('8月31日 · 计划')
+    expect(html).toContain('9月7日 · 未办')
+    expect(html).toContain('报价还是没发出去')
+  })
+
+  it('连着两周提到的人也算一条，带上那两周的备注', () => {
+    const archive = [
+      entry('2026-09-07', { people: [{ name: '张总', note: '电话还没回' }] }),
+      entry(LAST, { people: [{ name: '张总', note: '方案又催了一次' }] }),
+    ]
+    const html = renderOpen(result, archive)
+    expect(html).toContain('2 周都提到')
+    expect(html).toContain('电话还没回')
+    expect(html).toContain('方案又催了一次')
+  })
+
+  it('页头概览里也带上这句：一眼看出跟上次比是涨了还是掉了', () => {
+    const html = render(result, [lastWeek])
+    const block = html.slice(html.indexOf('class="result-brief"'), html.indexOf('outline-bar'))
+    expect(block).toContain('class="brief-prev"')
+    expect(block).toContain('上周 3 ↑1')
+    expect(block).toContain('上周 4 ↓2')
+  })
+
+  it('目录里「反复出现」的条数来自归档，没有重复时那一项是空的', () => {
+    const navOf = (archive: WeekEntry[]) => {
+      const html = render(result, archive)
+      const nav = html.slice(html.indexOf('outline-bar'), html.indexOf('</nav>'))
+      return nav.slice(nav.indexOf('反复出现'), nav.indexOf('状态'))
+    }
+    expect(navOf(stale)).toContain('outline-count">1')
+    expect(navOf([])).toContain('反复出现</button>')
+  })
+
+  it('反复出现那张卡按条数给徽标，条数为 0 时不显示数字', () => {
+    expect(cardHtml(render(result, stale), 'pattern', 'state')).toContain('card-count">1')
+    const empty = render(result, [])
+    expect(cardHtml(empty, 'pattern', 'state')).not.toContain('card-count')
+    // 卡片本身还在：没有重复也要说一句「还没看出重复」
+    expect(empty).toContain('id="section-pattern"')
   })
 })

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import electronPath from 'electron'
@@ -16,10 +16,14 @@ import electronPath from 'electron'
  *   node scripts/measure-memory.mjs --walk 6     再走几步：交卡 → 定档 → 发 6 轮回答
  *   node scripts/measure-memory.mjs --skip 3     连点 3 次「这题跳过」，看题目是不是真的换了一道
  *   node scripts/measure-memory.mjs --result     走完采访并生成结果，打印结果页区块顺序与页头概览
+ *   node scripts/measure-memory.mjs --result --seed <weeks.json> --shot <目录>
+ *                                                塞一份真归档进去，并把结果页、总览页截屏存下来
+ *                                                （0.9.6 靠它看「上周对比」与「反复出现」真的长什么样）
  *   node scripts/measure-memory.mjs --packaged … 上面任一种都行，但拉的是装好的那一份
  *
  * 用的是一次性 userData（预置一份空 Key 的配置，好让它直接进采访页、走演示模式），
- * 所以不会碰到你真实的配置与会话 —— 验装机版时也一样。
+ * 所以不会碰到你真实的配置与会话 —— 验装机版时也一样。`--seed` 是唯一往这份临时目录里
+ * 搬东西的开关，而且只读地拷一份归档进去，不动原件。
  */
 
 const WALK_INDEX = process.argv.indexOf('--walk')
@@ -28,6 +32,17 @@ const SKIP_INDEX = process.argv.indexOf('--skip')
 const SKIP = SKIP_INDEX > -1 ? Number(process.argv[SKIP_INDEX + 1] ?? 3) : 0
 /** `--result`：走完采访并生成结果，用来看结果页（0.9.5 重排过层级）真的长什么样 */
 const WANT_RESULT = process.argv.includes('--result')
+/**
+ * `--seed <weeks.json>`：把一份**真归档**塞进这次的一次性 userData。
+ *
+ * 「上周对比」和「反复出现」都是从 weeks.json 里算出来的：不给它一份有历史的归档，
+ * 结果页上那两处只会是空的 —— 也就等于没验。
+ */
+const SEED_INDEX = process.argv.indexOf('--seed')
+const SEED = SEED_INDEX > -1 ? process.argv[SEED_INDEX + 1] : ''
+/** `--shot <目录>`：把结果页与总览页截成 PNG，给这一版新长出来的东西留个证据 */
+const SHOT_INDEX = process.argv.indexOf('--shot')
+const SHOT = SHOT_INDEX > -1 ? process.argv[SHOT_INDEX + 1] : ''
 const PORT = 9333
 const TIMEOUT_MS = 180_000
 
@@ -41,6 +56,15 @@ writeFileSync(
     persona: { prompt: '', preset: 'warm' },
   }),
 )
+if (SEED) {
+  if (existsSync(SEED)) {
+    copyFileSync(SEED, join(userData, 'weeks.json'))
+    process.stdout.write(`已塞入归档：${SEED}\n`)
+  } else {
+    process.stdout.write(`（找不到 ${SEED}，这次按空归档跑）\n`)
+  }
+}
+if (SHOT) mkdirSync(SHOT, { recursive: true })
 
 const env = { ...process.env }
 // 与 smoke.mjs 同一条坑：它一旦被继承，electron.exe 会以纯 Node 模式启动
@@ -190,6 +214,11 @@ const PROBE = `
     // 结果页上的区块顺序（0.9.5 把主线与计划提到了最前）
     sections: [...document.querySelectorAll('[id^="section-"]')].map((el) => el.id),
     brief: document.querySelector('.result-brief')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+    // 0.9.6：跟上次比出来的那几行小字（没打分的那几项不该有）
+    prevTags: [...document.querySelectorAll('.state-prev, .brief-prev')].map((el) => el.textContent.trim()),
+    // 0.9.6：跨周重复的东西（卡片收起时这里是空的 —— 展开之后才看得到）
+    patterns: [...document.querySelectorAll('.pattern-item')].map((el) => el.innerText.replace(/\s+/g, ' ').trim()),
+    patternEmpty: document.querySelector('.pattern-empty')?.textContent.replace(/\s+/g, ' ').trim() ?? '',
   }
 `
 
@@ -250,6 +279,35 @@ async function waitForApp(client, timeoutMs = 30_000) {
      els[${index}].click()
      return true`,
   )
+}
+
+/**
+ * 截一张图（`--shot <目录>`）。
+ *
+ * 为什么要有：0.9.6 新加的「上次对比」与「反复出现」纯粹是排版活儿，
+ * 光看 DOM 里的文字说明不了它长得对不对 —— 得真的看一眼。
+ */
+async function shot(client, name) {
+  if (!SHOT) return
+  await client.send('Page.enable')
+  const { data } = await client.send('Page.captureScreenshot', { format: 'png' })
+  const file = join(SHOT, `${name}.png`)
+  writeFileSync(file, Buffer.from(data, 'base64'))
+  process.stdout.write(`已截图：${file}\n`)
+}
+
+/** 把某一块滚到屏幕中间再截一张（结果页比一屏长） */
+async function scrollShot(client, selector, name) {
+  const ok = await evaluate(
+    client,
+    `const el = document.querySelector(${JSON.stringify(selector)})
+     if (!el) return false
+     el.scrollIntoView({ block: 'center' })
+     return true`,
+  )
+  if (!ok) return
+  await sleep(400)
+  await shot(client, name)
 }
 
 /** 往输入框里塞一句话并发送（React 受控组件得走原生 setter + input 事件） */
@@ -349,6 +407,32 @@ async function main() {
     await settle(client, 60_000)
     await sleep(500)
     await snap(client, '生成之后（结果页）')
+
+    if (SHOT) {
+      await shot(client, 'result-top')
+      // 展开「状态」与「反复出现」两栏 —— 0.9.6 新长的东西都在这两栏里
+      await click(client, '#section-state .card-head')
+      await click(client, '#section-pattern .card-head')
+      await sleep(400)
+      await snap(client, '展开状态与反复出现之后')
+      await scrollShot(client, '#section-pattern', 'result-pattern')
+      await scrollShot(client, '#section-state', 'result-state')
+      // 总览页（同一套对比也长在里面）
+      const opened = await evaluate(
+        client,
+        `const b = [...document.querySelectorAll('.result-actions .btn')]
+           .find((x) => x.textContent.includes('看总览'))
+         if (!b) return false
+         b.click()
+         return true`,
+      )
+      if (opened) {
+        await settle(client)
+        await sleep(500)
+        await shot(client, 'history')
+        await snap(client, '总览页')
+      }
+    }
   }
 
   process.stdout.write('\n')
@@ -377,6 +461,20 @@ async function main() {
   for (const row of withSections) {
     process.stdout.write(`\n${row.时点} 的区块顺序：\n  ${row.sections.join(' → ')}\n`)
     if (row.brief) process.stdout.write(`页头概览：${row.brief}\n`)
+  }
+
+  // 0.9.6 那两条：跨周算出来的东西到底有没有出现在界面上
+  const withTrends = rows.filter(
+    (row) => row.prevTags?.length > 0 || row.patterns?.length > 0 || row.patternEmpty,
+  )
+  for (const row of withTrends) {
+    process.stdout.write(`\n${row.时点} 的跨周线索：\n`)
+    if (row.prevTags?.length) process.stdout.write(`  与上次对比：${row.prevTags.join(' / ')}\n`)
+    if (row.patterns?.length) {
+      process.stdout.write(`  反复出现：\n${row.patterns.map((p) => `    ${p}`).join('\n')}\n`)
+    } else if (row.patternEmpty) {
+      process.stdout.write(`  反复出现：${row.patternEmpty}\n`)
+    }
   }
   process.stdout.write('\n（进程的工作集与私有内存由调用方另外量，见 npm run measure:memory）\n')
 

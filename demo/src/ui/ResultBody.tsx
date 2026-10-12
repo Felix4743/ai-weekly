@@ -3,13 +3,22 @@ import type { ListKey } from '../core/resultEdit'
 import { countSection } from '../core/outline'
 import { STATE_FIELDS } from '../core/stateFields'
 import { attachState, withScore } from '../core/stateScore'
+import {
+  PATTERN_WINDOW,
+  compareText,
+  patternHitLine,
+  patternHitText,
+  patternSummary,
+  type PatternGroup,
+  type StateComparison,
+} from '../core/trends'
 import type { PersonNote, StateKey, WeeklyResult } from '../core/types'
 import { CollapsibleCard, type CollapsibleKey } from './CollapsibleCard'
 import { EditableList, EditablePeople } from './EditableList'
 import { StateScore } from './StateScore'
 
 /**
- * 一份结果的正文：五栏清单（可折叠）+ 本周主线 + 下周计划。
+ * 一份结果的正文：几栏清单（可折叠）+ 本周主线 + 下周计划 + 反复出现。
  *
  * 结果页和总览页共用它 —— 两边看的是同一份结构，区别只在于
  * 「改的是本周」还是「改的是某一周的存档」，以及下周计划卡片底部多不多一块东西。
@@ -22,6 +31,10 @@ interface Props {
   onToggle: (key: CollapsibleKey) => void
   /** 下周计划卡片底部附加的内容：结果页放「重新整理」，看存档时什么都不放 */
   planFooter?: ReactNode
+  /** 跟上次记的那一周比：状态那四行后面各挂一句小字。算不出来就不传 */
+  compare?: StateComparison
+  /** 跨周反复出现的东西（core/trends.ts 算好的）。看某一周时按那一刻的情况传 */
+  patterns?: PatternGroup[]
 }
 
 export function ResultBody({
@@ -30,6 +43,8 @@ export function ResultBody({
   collapsed,
   onToggle,
   planFooter,
+  compare,
+  patterns = [],
 }: Props) {
   const setList = (key: ListKey) => (items: string[]) => onResultChange({ ...result, [key]: items })
   const setPeople = (people: PersonNote[]) => onResultChange({ ...result, people })
@@ -58,6 +73,9 @@ export function ResultBody({
         result.state.followUp,
       ),
     })
+
+  /** 状态那四行后面跟的小字（`上周 3 ↑1`）：按 key 查一次，省得每行都 find 一遍 */
+  const beforeByKey = new Map((compare?.rows ?? []).map((row) => [row.key, row]))
 
   return (
     <>
@@ -174,6 +192,42 @@ export function ResultBody({
         />
       </CollapsibleCard>
 
+      {/* 跨周反复出现的东西（0.9.6）：数据早就在归档里了，这儿只是换一种看法 ——
+          一直挂在未办里的、上周计划里说了这周还没动的、连着几周提到的人 */}
+      <CollapsibleCard
+        sectionKey="pattern"
+        title="反复出现"
+        desc={`跨周重复的东西 —— 一直挂在未办里的、计划里说了还没动的、连着几周提到的人。只看最近 ${PATTERN_WINDOW} 条记录。`}
+        count={patterns.length}
+        collapsed={collapsed.pattern}
+        onToggle={() => onToggle('pattern')}
+      >
+        {patterns.length === 0 ? (
+          <p className="pattern-empty">
+            还没看出重复 —— 同一件事连着两周挂着、或者同一个人连着两周提到，这里就会列出来。
+          </p>
+        ) : (
+          <ul className="pattern-list">
+            {patterns.map((group) => (
+              <li className="pattern-item" key={`${group.kind}-${group.text}`}>
+                <p className="pattern-head">
+                  <span className="pattern-tag">{patternSummary(group)}</span>
+                  <span className="pattern-text">{group.text}</span>
+                </p>
+                <ul className="pattern-hits">
+                  {group.hits.map((hit) => (
+                    <li className="pattern-hit" key={hit.week}>
+                      <span className="pattern-when">{patternHitLine(hit)}</span>
+                      <span className="pattern-what">{patternHitText(hit)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CollapsibleCard>
+
       <CollapsibleCard
         sectionKey="state"
         title="状态"
@@ -183,16 +237,29 @@ export function ResultBody({
         onToggle={() => onToggle('state')}
       >
         <div className="state-form">
-          {STATE_FIELDS.map((f) => (
-            <div key={f.key} className="state-row">
-              <span className="state-label">{f.label}</span>
-              <StateScore
-                ariaLabel={`${f.label}评分`}
-                score={result.state.scores?.[f.key]}
-                onChange={(v) => setStateScore(f.key, v)}
-              />
-            </div>
-          ))}
+          {STATE_FIELDS.map((f) => {
+            const row = beforeByKey.get(f.key)
+            const before = row ? compareText(row) : ''
+            return (
+              <div key={f.key} className="state-row">
+                <span className="state-label">{f.label}</span>
+                <StateScore
+                  ariaLabel={`${f.label}评分`}
+                  score={result.state.scores?.[f.key]}
+                  onChange={(v) => setStateScore(f.key, v)}
+                />
+                {/* 跟上次记的那一周比 —— 鼠标停上去能看到上次是哪一周 */}
+                {before && (
+                  <span
+                    className="state-prev"
+                    title={compare?.previousRange ? `上一次记的：${compare.previousRange}` : undefined}
+                  >
+                    {before}
+                  </span>
+                )}
+              </div>
+            )
+          })}
           <textarea
             className="state-note"
             rows={2}

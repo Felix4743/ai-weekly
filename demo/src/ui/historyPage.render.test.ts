@@ -84,7 +84,7 @@ describe('总览页渲染', () => {
     expect(html).toContain('全部记录')
   })
 
-  it('本周有记录时：详情里就是这一周的全文，六栏照旧默认收起', () => {
+  it('本周有记录时：详情里就是这一周的全文，七栏照旧默认收起', () => {
     const html = render([
       entry(THIS_WEEK, {
         highlights: ['这周基本在补债'],
@@ -96,8 +96,8 @@ describe('总览页渲染', () => {
     ])
     expect(html).toContain('这周基本在补债')
     expect(html).toContain('事情 1')
-    // 六栏（含 0.9.1 的状态、0.9.3 的成长）都是收起态
-    expect(html.match(/aria-expanded="false"/g)).toHaveLength(6)
+    // 七栏（含 0.9.1 的状态、0.9.3 的成长、0.9.6 的反复出现）都是收起态
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(7)
     // 收起态：条目本身不出现在首屏 HTML 里
     expect(html).not.toContain('把积压的评审都过了')
     expect(html).not.toContain('报销还没交')
@@ -152,14 +152,16 @@ describe('总览页 · 状态与成长卡（0.9.1 状态 / 0.9.3 成长）', () 
     const html = render([entry(THIS_WEEK, { pending: ['报销还没交'] })])
     const plan = html.indexOf('id="section-plan"')
     const pending = html.indexOf('id="section-pending"')
+    const pattern = html.indexOf('id="section-pattern"')
     const state = html.indexOf('id="section-state"')
     const growth = html.indexOf('id="section-growth"')
     const highlights = html.indexOf('id="section-highlights"')
     expect(highlights).toBeGreaterThanOrEqual(0)
-    // 总览页与结果页共用 ResultBody，所以顺序必须一起变（0.9.5 重排）
+    // 总览页与结果页共用 ResultBody，所以顺序必须一起变（0.9.5 重排、0.9.6 加反复出现）
     expect(highlights).toBeLessThan(plan)
     expect(plan).toBeLessThan(pending)
-    expect(pending).toBeLessThan(state)
+    expect(pending).toBeLessThan(pattern)
+    expect(pattern).toBeLessThan(state)
     expect(state).toBeLessThan(growth)
   })
 
@@ -185,5 +187,25 @@ describe('总览页 · 状态与成长卡（0.9.1 状态 / 0.9.3 成长）', () 
       entry(THIS_WEEK, { highlights: ['有记录'], growth: ['读完《长日将尽》'] }),
     ])
     expect(cardHtml(html, 'growth')).toContain('card-count">1')
+  })
+})
+
+describe('总览页 · 把归档用起来（0.9.6）', () => {
+  it('看某一周时，详情里的「反复出现」就按那一刻算', () => {
+    const html = render([
+      entry(TWO_AGO, { nextFocus: ['把报价发出去'] }),
+      entry(LAST_WEEK, { pending: ['报价还是没发出去'] }),
+      entry(THIS_WEEK, { highlights: ['有记录'] }),
+    ])
+    expect(html).toContain('反复出现')
+    expect(cardHtml(html, 'pattern', 'state')).toContain('card-count">1')
+  })
+
+  it('归档里没有重复时那一栏不显示数字，卡片照旧在', () => {
+    const html = render([
+      entry(THIS_WEEK, { highlights: ['有记录'], pending: ['报销还没交'] }),
+    ])
+    expect(cardHtml(html, 'pattern', 'state')).not.toContain('card-count')
+    expect(html).toContain('id="section-pattern"')
   })
 })
