@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { WeekEntry } from '../core/archive'
 import { countSection } from '../core/outline'
-import { attachState } from '../core/stateScore'
+import { attachState, SCORE_MAX } from '../core/stateScore'
 import { compareScores, previousEntry, recurringPatterns } from '../core/trends'
 import { createEmptyResult, createEmptyState, type ChatMessage, type WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED } from './CollapsibleCard'
+import { PeekRating } from './PeekRating'
 import { StateScore } from './StateScore'
 import { ResultBody } from './ResultBody'
 import { ResultPage } from './ResultPage'
@@ -73,23 +74,83 @@ function forEachElement(node: ReactNode, visit: (el: ReactElement) => void): voi
 }
 
 /**
+ * 往下钻一层：把树里的**函数组件就地跑一遍**，把它们的输出摊平进树里。
+ *
+ * 为什么需要它：`forEachElement` 只顺着 `props.children` 走，遇到没被渲染的
+ * 函数组件（比如 `<StateScore />`、`<CollapsibleCard />`）就停在那儿 ——
+ * 组件里面的星星、备注框都走不到。0.9.8 之前这条路上只有 `StateScore`，
+ * 星星按钮是它直接返回的，所以没这个问题；现在星星藏在 PeekRating 里，
+ * 就得先把 StateScore 跑出来。
+ *
+ * 这不是「渲染」：不碰 DOM、也不新增 jsdom，只是把组件函数调一次拿到元素树，
+ * 所以本文件仍然跑在 node 环境里（真手势在 `peekRating.dom.test.tsx` 里测）。
+ */
+function called(node: ReactNode): ReactNode {
+  const cache = new Map<string, ReactNode>()
+  const walk = (n: ReactNode): ReactNode => {
+    if (Array.isArray(n)) return n.map((child) => walk(child as ReactNode))
+    if (!isValidElement(n)) return n
+    const el = n as ReactElement
+    if (typeof el.type === 'function') {
+      // 同一种组件、不同 props（比如四排星各是一个分数）必须是不同的输出，
+      // 所以键要带上 props —— 这些都是简单值，JSON 一下就够
+      const key = `${(el.type as { name?: string }).name}|${JSON.stringify(el.props)}`
+      if (cache.has(key)) return cache.get(key)
+      let out: ReactNode
+      try {
+        out = walk((el.type as (props: unknown) => ReactNode)(el.props))
+      } catch {
+        // 带着 hooks 的组件（PeekRating 自己）不能这么调：就停在它这一层
+        // —— 这个文件要的是它的 props，不是它里面的按钮
+        return el
+      }
+      cache.set(key, out)
+      return out
+    }
+    if (!el.props || !('children' in el.props)) return el
+    return { ...el, props: { ...el.props, children: walk(el.props.children as ReactNode) } } as ReactElement
+  }
+  return walk(node)
+}
+
+/**
  * 结果页那四排星。
  *
- * 星星按钮在 `StateScore` 里面，元素树走不到（函数组件没被调用），
- * 所以这里按「四排星的组件」认人，点星的动作交给下面那组直接测 StateScore。
+ * 0.9.8 起那一排星的按钮在 `PeekRating` 里面，而 `StateScore` 只是一层换算
+ * （undefined ↔ 0）。四排星的分数得从 `PeekRating` 的 `value` 上读，
+ * 所以这里按「PeekRating 组件」认人。
  */
 function scoreRows(tree: ReactNode): ReactElement[] {
   const out: ReactElement[] = []
-  forEachElement(tree, (el) => {
-    if (el.type === StateScore) out.push(el)
+  forEachElement(called(tree), (el) => {
+    if (el.type === PeekRating) out.push(el)
   })
   return out
+}
+
+/**
+ * 数「亮着的星星」。
+ *
+ * 静态渲染看不到 `data-lit`（那是 PeekRating 在 `useLayoutEffect` 里画的），
+ * 但每颗按钮身上都有 `title="3 of 5"`（第几颗、共几颗），而亮的规则跟
+ * 组件里一致：**分数是几，这一排的前几颗就亮**。分数从
+ * `aria-checked="true"` 那颗的位置读出来。
+ */
+function litCount(html: string): number {
+  const rows = html.split('class="peek-rating"').slice(1)
+  let lit = 0
+  for (const row of rows) {
+    const checked = row.indexOf('aria-checked="true"')
+    if (checked === -1) continue
+    lit += (row.slice(0, checked).match(/class="peek-rating__glyph"/g) ?? []).length + 1
+  }
+  return lit
 }
 
 /** 状态卡下面那一行备注（别的栏目也有 textarea，按 class 认人） */
 function stateNoteBox(tree: ReactNode): ReactElement | undefined {
   let found: ReactElement | undefined
-  forEachElement(tree, (el) => {
+  forEachElement(called(tree), (el) => {
     if (el.type === 'textarea' && el.props.className === 'state-note') found = el
   })
   return found
@@ -98,7 +159,7 @@ function stateNoteBox(tree: ReactNode): ReactElement | undefined {
 /** 状态卡里的「追问小结」那一格（0.9.4 新加）：样式跟备注共用，靠 state-followup 认人 */
 function stateFollowUpBox(tree: ReactNode): ReactElement | undefined {
   let found: ReactElement | undefined
-  forEachElement(tree, (el) => {
+  forEachElement(called(tree), (el) => {
     const cls = String(el.props.className ?? '')
     if (el.type === 'textarea' && cls.includes('state-followup')) found = el
   })
@@ -236,8 +297,8 @@ describe('状态卡（0.9.3 起的四项打分 + 一行备注）', () => {
     for (const label of STATE_LABELS) {
       expect(html).toContain(`class="state-label">${label}<`)
     }
-    // 四排各五颗星
-    expect(html.match(/class="star[ "]/g)).toHaveLength(20)
+    // 四排各五颗星（0.9.8 起是 PeekRating 的字形，不再是字符 ★）
+    expect(html.match(/class="peek-rating__glyph"/g)).toHaveLength(20)
     expect(html).toContain('class="state-note"')
     expect(html).toContain('想补一句什么')
     // 点过的分数与备注都渲染出来
@@ -264,7 +325,8 @@ describe('状态卡（0.9.3 起的四项打分 + 一行备注）', () => {
       '运动评分',
       '饮食评分',
     ])
-    expect(rows.map((r) => r.props.score)).toEqual([4, 2, undefined, undefined])
+    // PeekRating 只认 0–5：「没打分」到它这儿是 0
+    expect(rows.map((r) => r.props.value)).toEqual([4, 2, 0, 0])
   })
 
   it('改备注只动备注，分数和别的栏目一动不动', () => {
@@ -359,8 +421,8 @@ describe('状态卡（0.9.3 起的四项打分 + 一行备注）', () => {
 describe('状态评分（结果页上的星星）', () => {
   it('四项各一排五颗星，没打分时写「未打分」，一颗都不亮', () => {
     const html = renderBody({ ...result, state: createEmptyState() })
-    expect(html.match(/class="star"/g)).toHaveLength(20)
-    expect(html.match(/class="star on"/g)).toBeNull()
+    expect(html.match(/class="peek-rating__glyph"/g)).toHaveLength(20)
+    expect(litCount(html)).toBe(0)
     expect(html.match(/未打分/g)).toHaveLength(4)
     // 每排 5 颗，按钮上的名字带得出是哪一项
     for (const label of STATE_LABELS) {
@@ -373,8 +435,9 @@ describe('状态评分（结果页上的星星）', () => {
       ...result,
       state: attachState({ mood: 4, sport: 2 }, ''),
     })
-    // 4 + 2 颗亮着
-    expect(html.match(/class="star on"/g)).toHaveLength(6)
+    // 4 + 2 颗亮着（静态渲染拿不到 data-lit，那是 useLayoutEffect 里画的，
+    // 所以按「选中那颗的位置」往回数亮了几颗）
+    expect(litCount(html)).toBe(6)
     expect(html).toContain('4 / 5')
     expect(html).toContain('2 / 5')
     // 另外两项还是「未打分」
@@ -398,9 +461,10 @@ describe('状态评分（结果页上的星星）', () => {
     const scored: WeeklyResult = { ...result, state: attachState({ mood: 3 }, '这周一直悬着') }
     const calls: WeeklyResult[] = []
     const rows = scoreRows(bodyTree(scored, (next) => calls.push(next)))
-    expect(rows[0].props.score).toBe(3)
+    expect(rows[0].props.value).toBe(3)
 
-    rows[0].props.onChange(undefined)
+    // PeekRating 取消时给的是 0（它的口径），StateScore 负责翻成「没打分」
+    rows[0].props.onChange(0)
 
     expect(calls).toHaveLength(1)
     expect('scores' in calls[0].state).toBe(false)
@@ -420,83 +484,48 @@ describe('状态评分（结果页上的星星）', () => {
   it('没点过分的档：四排星都还是「没点过」的样子', () => {
     const fresh: WeeklyResult = { ...result, state: createEmptyState() }
     const rows = scoreRows(bodyTree(fresh))
-    expect(rows.map((r) => r.props.score)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ])
+    // 没打过分的项在 StateScore 里被翻成 0，一颗都不亮（不是 undefined：
+    // PeekRating 只认 0–5，undefined 会让它变成非受控）
+    expect(rows.map((r) => r.props.value)).toEqual([0, 0, 0, 0])
     const html = renderBody(fresh)
     expect(html.match(/未打分/g)).toHaveLength(4)
-    expect(html.match(/class="star on"/g)).toBeNull()
+    expect(litCount(html)).toBe(0)
     expect(html).not.toContain('0 / 5')
   })
 })
 
 /**
- * 点星这套规则本身（采访页与结果页共用同一个组件）。
- * 组件是函数式的、没有 hooks，所以直接调用它拿元素树来点，不必凑 jsdom。
+ * StateScore 这一层只做一件事：把「没打分」（undefined）翻成 PeekRating 认的 0。
+ *
+ * 真正的手势（点、拖、键盘、取消）在 `peekRating.dom.test.tsx` 里用 jsdom 测 ——
+ * 那些规则必须真跑一遍事件才知道对不对，光看元素树看不出来。
  */
-describe('一排星的点击规则', () => {
-  function starButtons(
-    score: number | undefined,
-    onChange: (value: number | undefined) => void = () => {},
-  ): ReactElement[] {
-    const tree = StateScore({ label: '这周的心情', score, onChange })
-    const out: ReactElement[] = []
-    forEachElement(tree, (el) => {
-      if (el.type === 'button') out.push(el)
-    })
-    return out
+describe('StateScore 与 PeekRating 的接缝', () => {
+  function ratingOf(score: number | undefined, disabled = false): ReactElement {
+    let found: ReactElement | undefined
+    forEachElement(
+      StateScore({ label: '这周的心情', score, disabled, onChange: () => {} }),
+      (el) => {
+        if (el.type === PeekRating) found = el
+      },
+    )
+    expect(found).toBeDefined()
+    return found!
   }
 
-  it('五颗星都在，名字带上这一项', () => {
-    const stars = starButtons(undefined)
-    expect(stars).toHaveLength(5)
-    expect(stars.map((el) => el.props['aria-label'])).toEqual([
-      '这周的心情 1 星',
-      '这周的心情 2 星',
-      '这周的心情 3 星',
-      '这周的心情 4 星',
-      '这周的心情 5 星',
-    ])
+  it('没打分时给 PeekRating 的是 0 —— 给 undefined 会被它当成非受控，自己记分', () => {
+    expect(ratingOf(undefined).props.value).toBe(0)
   })
 
-  it('点第 N 颗就传 N 分', () => {
-    const calls: (number | undefined)[] = []
-    starButtons(undefined, (v) => calls.push(v))[2].props.onClick()
-    expect(calls).toEqual([3])
+  it('打过分就把分数原样给它，那颗星的名字带上这一项', () => {
+    const rating = ratingOf(4)
+    expect(rating.props.value).toBe(4)
+    expect(rating.props.ariaLabel).toBe('这周的心情')
+    expect(rating.props.count).toBe(SCORE_MAX)
   })
 
-  it('点同一颗是取消，传 undefined 而不是 0', () => {
-    const calls: (number | undefined)[] = []
-    starButtons(3, (v) => calls.push(v))[2].props.onClick()
-    expect(calls).toEqual([undefined])
-  })
-
-  it('改点别的颗就是改分', () => {
-    const calls: (number | undefined)[] = []
-    const stars = starButtons(3, (v) => calls.push(v))
-    stars[4].props.onClick()
-    stars[0].props.onClick()
-    expect(calls).toEqual([5, 1])
-  })
-
-  it('传了 disabled 时五颗都点不动', () => {
-    const stars = starButtons(2)
-    expect(stars.map((el) => el.props.disabled)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ])
-    const off = StateScore({ label: '这周的心情', score: 2, disabled: true, onChange: () => {} })
-    const disabled: ReactElement[] = []
-    forEachElement(off, (el) => {
-      if (el.type === 'button') disabled.push(el)
-    })
-    expect(disabled.map((el) => el.props.disabled)).toEqual([true, true, true, true, true])
+  it('禁用也照样往下传（AI 正在回复时四排星一起点不动）', () => {
+    expect(ratingOf(2, true).props.disabled).toBe(true)
   })
 })
 

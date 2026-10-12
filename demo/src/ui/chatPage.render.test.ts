@@ -15,6 +15,24 @@ import { ChatPage } from './ChatPage'
  * 四排星各是哪一项、交卡之后问的是不是定档」。
  */
 
+/**
+ * 数「亮着的星星」。
+ *
+ * 静态渲染看不到 `data-lit`（那是 PeekRating 在 `useLayoutEffect` 里画的），
+ * 但每排被选中的那颗带 `aria-checked="true"`，而亮的规则是**分数是几、
+ * 这一排的前几颗就亮**，所以数选中那颗前面有几颗、再加它自己。
+ */
+function litCount(html: string): number {
+  const rows = html.split('class="peek-rating"').slice(1)
+  let lit = 0
+  for (const row of rows) {
+    const checked = row.indexOf('aria-checked="true"')
+    if (checked === -1) continue
+    lit += (row.slice(0, checked).match(/class="peek-rating__glyph"/g) ?? []).length + 1
+  }
+  return lit
+}
+
 function msg(patch: Partial<ChatMessage> & { id: string; role: ChatMessage['role'] }): ChatMessage {
   return { text: '……', ...patch } as ChatMessage
 }
@@ -72,14 +90,15 @@ describe('采访页的状态卡', () => {
     const html = render({})
     expect(html).toContain('class="state-card"')
     expect(html.match(/class="state-score"/g)).toHaveLength(4)
-    expect(html.match(/class="star"/g)).toHaveLength(20)
+    expect(html.match(/class="peek-rating__glyph"/g)).toHaveLength(20)
     for (const field of STATE_FIELDS) {
       expect(html).toContain(`>${field.label}<`)
       expect(html).toContain(field.ask)
     }
-    // 还没点过：四排都是「未打分」，一颗都不亮
+    // 还没点过：四排都是「未打分」，一颗都不亮（亮不亮是 useLayoutEffect 画的，
+    // 静态渲染看不到 data-lit，所以按「第几颗被选中」来数）
     expect(html.match(/未打分/g)).toHaveLength(4)
-    expect(html.match(/class="star on"/g)).toBeNull()
+    expect(litCount(html)).toBe(0)
     expect(html).toContain('打好了，开始聊这周')
   })
 
@@ -93,7 +112,7 @@ describe('采访页的状态卡', () => {
 
   it('点过的分在卡上亮着，四排各挂自己那一项', () => {
     const html = render({ stateScores: { sleep: 4, diet: 2 } })
-    expect(html.match(/class="star on"/g)).toHaveLength(6)
+    expect(litCount(html)).toBe(6)
     expect(html).toContain('4 / 5')
     expect(html).toContain('2 / 5')
     // 另外两项还是「未打分」
@@ -121,15 +140,15 @@ describe('采访页的状态卡', () => {
     const html = render({ interview: IN_BLOCK, messages: CHAT })
     expect(html).not.toContain('class="state-card"')
     expect(html).not.toContain('class="state-score"')
-    expect(html).not.toContain('class="star"')
+    expect(html).not.toContain('peek-rating')
     expect(html).toContain('这周主要忙了些什么？')
   })
 
   it('AI 正在回复时，星和卡片按钮一起禁用', () => {
     const idle = render({})
-    expect(idle.match(/class="star"[^>]*disabled/g)).toBeNull()
+    expect(idle.match(/class="peek-rating__star"[^>]*disabled/g)).toBeNull()
     const busy = render({ busy: true })
-    expect(busy.match(/class="star"[^>]*disabled/g)).toHaveLength(20)
+    expect(busy.match(/class="peek-rating__star"[^>]*disabled/g)).toHaveLength(20)
   })
 
   it('「从头再聊一遍」一直摆在下面（一周聊两次是常态）', () => {

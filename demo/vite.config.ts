@@ -116,6 +116,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // .tsx：0.9.8 起 PeekRating 的手势测试要真 DOM，单独在那个文件顶上写
+    // `@vitest-environment jsdom`，其余文件照旧跑 node（没有 DOM，快得多）
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // 打开 React 的 act 环境（见 src/test-setup.ts 里的说明）
+    setupFiles: ['src/test-setup.ts'],
   },
 })
