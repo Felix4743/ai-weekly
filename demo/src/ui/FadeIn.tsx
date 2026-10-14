@@ -1,7 +1,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 /**
- * 一个小小的入场动效（0.9.9 加的，给「值得停一下」的地方用）。
+ * 一个小小的入场动效（0.9.10 加的，给「值得停一下」的地方用）。
  *
  * 为什么是它而不是动画库：这个项目的约束是「能不引就不引」，
  * 所以淡入淡出这件事自己写 40 行就够 —— 不依赖 keyframes，也不依赖 Framer。

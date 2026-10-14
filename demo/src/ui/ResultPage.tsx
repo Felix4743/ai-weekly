@@ -217,7 +217,7 @@ export function ResultPage({
 
       {/* 页头概览（0.9.5）：一眼看到「这周状态怎么样、主线是哪一句」——
           不用先滚过六张卡。都从这份结果里读，改了就跟着变。
-          0.9.9 起整个概览带一点入场（FadeIn）：星星在先、主线压一拍 */}
+          0.9.10 起整个概览带一点入场（FadeIn）：星星在先、主线压一拍 */}
       <FadeIn delay={0.04}>
         <section className="result-brief" aria-label="这周概览">
           <div className="brief-scores">

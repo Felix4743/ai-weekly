@@ -187,7 +187,7 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
         </div>
       </div>
 
-      {/* 近三周：最想知道的就是这两三句，先摆出来（0.9.9：三张卡依次轻轻浮出） */}
+      {/* 近三周：最想知道的就是这两三句，先摆出来（0.9.10：三张卡依次轻轻浮出） */}
       <div className="recent-grid">
         {slots.map((slot, i) => {
           const line = mainLine(slot.entry)
