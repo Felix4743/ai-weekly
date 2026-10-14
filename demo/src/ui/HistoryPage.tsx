@@ -33,6 +33,7 @@ import {
 } from '../core/week'
 import type { WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { FadeIn } from './FadeIn'
 import { IconBack, IconCheck, IconChevron, IconCopy, IconSparkle } from './icons'
 import { ResultBody } from './ResultBody'
 
@@ -179,27 +180,28 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
         </div>
       </div>
 
-      {/* 近三周：最想知道的就是这两三句，先摆出来 */}
+      {/* 近三周：最想知道的就是这两三句，先摆出来（0.9.9：三张卡依次轻轻浮出） */}
       <div className="recent-grid">
-        {slots.map((slot) => {
+        {slots.map((slot, i) => {
           const line = mainLine(slot.entry)
           return (
-            <button
-              key={slot.week}
-              type="button"
-              className={`recent-card${slot.week === selected ? ' active' : ''}${
-                slot.entry ? '' : ' blank'
-              }`}
-              onClick={() => select(slot.week)}
-            >
-              <span className="recent-head">
-                <span className="recent-label">{slot.label}</span>
-                <span className="recent-range">{weekRangeText(slot.week)}</span>
-              </span>
-              <span className="recent-line">
-                {line ? excerpt(line) : slot.week === thisWeek ? '这周还没聊' : '这周没留下记录'}
-              </span>
-            </button>
+            <FadeIn key={slot.week} delay={0.04 + i * 0.06}>
+              <button
+                type="button"
+                className={`recent-card${slot.week === selected ? ' active' : ''}${
+                  slot.entry ? '' : ' blank'
+                }`}
+                onClick={() => select(slot.week)}
+              >
+                <span className="recent-head">
+                  <span className="recent-label">{slot.label}</span>
+                  <span className="recent-range">{weekRangeText(slot.week)}</span>
+                </span>
+                <span className="recent-line">
+                  {line ? excerpt(line) : slot.week === thisWeek ? '这周还没聊' : '这周没留下记录'}
+                </span>
+              </button>
+            </FadeIn>
           )
         })}
       </div>

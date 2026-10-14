@@ -19,6 +19,11 @@ import electronPath from 'electron'
  *   node scripts/measure-memory.mjs --result --seed <weeks.json> --shot <目录>
  *                                                塞一份真归档进去，并把结果页、总览页截屏存下来
  *                                                （0.9.6 靠它看「上周对比」与「反复出现」真的长什么样）
+ *   node scripts/measure-memory.mjs --result --theme dark --shot <目录>
+ *                                                上面任一种都行，加 --theme light|dark 就全程走指定主题
+ *                                                （0.9.10 起；`--dark` 是 `--theme dark` 的简写。
+ *                                                 不指定则跟随系统 —— 开发机是深色时拍出来就是深色，
+ *                                                 所以想留亮色证据必须显式写 --theme light）
  *   node scripts/measure-memory.mjs --packaged … 上面任一种都行，但拉的是装好的那一份
  *
  * 用的是一次性 userData（预置一份空 Key 的配置，好让它直接进采访页、走演示模式），
@@ -43,6 +48,18 @@ const SEED = SEED_INDEX > -1 ? process.argv[SEED_INDEX + 1] : ''
 /** `--shot <目录>`：把结果页与总览页截成 PNG，给这一版新长出来的东西留个证据 */
 const SHOT_INDEX = process.argv.indexOf('--shot')
 const SHOT = SHOT_INDEX > -1 ? process.argv[SHOT_INDEX + 1] : ''
+/**
+ * `--theme light|dark`（0.9.10）：全程按指定主题截图；`--dark` 是 `--theme dark` 的简写。
+ *
+ * 为什么要显式指定、不能靠默认值：默认是「跟随系统」，而**开发机大概率就是深色**，
+ * 于是「不指定」跑出来的其实是深色 —— 第一次这么跑时，亮色那一遍和深色那一遍
+ * 拍出来一模一样（两张图 sha256 相同才发现）。想两套都留证据就跑两遍。
+ *
+ * 主题在 CSS 里就是 `<html data-theme="dark">` 一个属性的事，令牌换一套就全变，
+ * 所以连上之后设一次就行，其余步骤完全一样。
+ */
+const THEME_INDEX = process.argv.indexOf('--theme')
+const THEME = THEME_INDEX > -1 ? String(process.argv[THEME_INDEX + 1] ?? '') : process.argv.includes('--dark') ? 'dark' : ''
 const PORT = 9333
 const TIMEOUT_MS = 180_000
 
@@ -448,6 +465,26 @@ async function main() {
   await client.send('Runtime.enable')
   await waitForApp(client)
   await settle(client)
+
+  /**
+   * 主题（0.9.10）：`--theme` / `--dark` 时在开拍之前定下来。
+   * 顺带把手动存过的那份偏好也写上 —— 不然 App 一挂载就按 localStorage（或系统偏好）
+   * 把属性又改回去，截图就白指定了。
+   */
+  if (THEME === 'dark' || THEME === 'light') {
+    const applied = await evaluate(
+      client,
+      THEME === 'dark'
+        ? `localStorage.setItem('ai-weekly.theme', 'dark')
+           document.documentElement.dataset.theme = 'dark'
+           return document.documentElement.dataset.theme`
+        : `localStorage.setItem('ai-weekly.theme', 'light')
+           delete document.documentElement.dataset.theme
+           return 'light（无属性）'`,
+    )
+    process.stdout.write(`（主题已指定：${applied}）\n`)
+    await sleep(200)
+  }
 
   await snap(client, '空闲（开场状态卡）')
 

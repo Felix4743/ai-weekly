@@ -7,32 +7,34 @@
    =========================================================================== */
 
 :root {
-  /* —— 底色与面板 —— */
-  --bg: #eef1f6;
-  --bar: rgba(238, 241, 246, 0.92);
-  --bg-tint: radial-gradient(1100px 560px at 100% -8%, rgba(13, 148, 136, 0.1), transparent 62%),
-    radial-gradient(820px 460px at -6% 0%, rgba(99, 102, 241, 0.07), transparent 58%);
+  /* —— 底色与面板（0.9.9 回暖：从「冷底白卡」调回「暖白纸感」，但保留现代的分层阴影） —— */
+  --bg: #f6f3ee;
+  --bar: rgba(246, 243, 238, 0.92);
+  --bg-tint: radial-gradient(1100px 560px at 100% -8%, rgba(13, 148, 136, 0.12), transparent 62%),
+    radial-gradient(820px 460px at -6% 0%, rgba(180, 83, 9, 0.08), transparent 58%);
   --panel: #ffffff;
-  --panel-2: #fafbfc;
-  --panel-3: #f4f6f8;
-  --panel-hover: #f8fafb;
+  --panel-2: #fafaf7;
+  --panel-3: #f4f2ec;
+  --panel-hover: #f8f6f1;
+  /* 半透明面板（话题栏那种浮在底上的玻璃片） */
+  --panel-glass: rgba(255, 255, 255, 0.72);
 
   /* —— 墨色三档 —— */
-  --ink: #101828;
-  --ink-2: #475467;
-  --ink-3: #98a2b3;
+  --ink: #2a2016;
+  --ink-2: #57493a;
+  --ink-3: #8a7a68;
 
   /* —— 线与分隔 —— */
-  --line: #e7eaee;
-  --line-soft: #f1f3f6;
+  --line: #e5e0d6;
+  --line-soft: #f0ece4;
 
   /* —— 主色（青绿，只是刻度换新） —— */
-  --accent: #0d9488;
+  --accent: #0f9488;
   --accent-ink: #0f766e;
   --accent-deep: #115e59;
-  --accent-soft: #e6f7f4;
-  --accent-line: #b8e6df;
-  --accent-glow: rgba(13, 148, 136, 0.2);
+  --accent-soft: #e8f4f0;
+  --accent-line: #b8e0d6;
+  --accent-glow: rgba(15, 148, 136, 0.22);
 
   /* —— 暖色：演示模式、提醒、成本相关 —— */
   --warm: #b54708;
@@ -47,6 +49,25 @@
   /* —— 星星：亮着的用琥珀色（比 --warm 亮，是「分数」不是「提醒」） —— */
   --star: #f59e0b;
   --star-off: #dfe4ea;
+
+  /* —— 供深色主题覆写的小令牌（0.9.10）：组件里不许再写死颜色 —— */
+  --accent-light: #12a697;
+  --accent-soft-strong: #d7f0eb;
+  --accent-halo: rgba(15, 148, 136, 0.12);
+  --line-strong: #d5dbe3;
+  --code-bg: rgba(16, 24, 40, 0.07);
+  --stage-fade: linear-gradient(180deg, #fdfefe, var(--panel) 160px);
+  --card-glow: linear-gradient(180deg, #f2fbf9 0%, #ffffff 55%);
+  --card-glow-2: linear-gradient(180deg, #f6fbfa 0%, #ffffff 50%);
+  --card-glow-active: linear-gradient(180deg, var(--accent-soft), #ffffff 70%);
+  --setup-bar: linear-gradient(180deg, rgba(255, 255, 255, 0.65), #fff 45%);
+  --ink-btn: #2a2016;
+  --ink-btn-hover: #1d2939;
+  --ink-btn-text: #fff;
+  --scrollbar: #d3d9e0;
+  --scrollbar-hover: #b9c1cb;
+  --warm-ink: #7c4a12;
+  --overlay-bg: rgba(244, 246, 248, 0.74);
 
   /* —— 形状 —— */
   --radius-xl: 22px;
@@ -67,13 +88,100 @@
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
   --dur: 0.18s;
 
-  /* —— 字阶：标题 / 卡片标题 / 正文 / 小字 / 说明 —— */
-  --fs-display: 30px;
+  /* —— 纸纹：一层几乎看不见的颗粒（SVG 噪声，3.5% 透明度），近看有纸感、远看是纯色 —— */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+
+  /* —— 字阶：标题 / 卡片标题 / 正文 / 小字 / 说明（0.9.10 起标题更大、字距更紧，往杂志感走） —— */
+  --fs-display: 34px;
   --fs-h2: 20px;
   --fs-title: 16.5px;
   --fs-body: 15px;
   --fs-sm: 13.5px;
   --fs-cap: 12.5px;
+  --tracking-display: -0.022em;
+
+  /* 让输入框、滚动条这些原生控件跟着亮色走 */
+  color-scheme: light;
+}
+
+/* ===========================================================================
+   深色主题（0.9.10）
+   只重写令牌，一条组件规则都不动 —— 这也是当初把颜色全收进 :root 的原因。
+   调性是「暖黑纸」而不是纯黑：底色带一点棕，跟亮色那套暖纸是同一家人。
+   开关写在 ui/theme.ts，结果落在 <html data-theme="dark">。
+   =========================================================================== */
+
+[data-theme='dark'] {
+  --bg: #1b1815;
+  --bar: rgba(27, 24, 21, 0.9);
+  --bg-tint: radial-gradient(1100px 560px at 100% -8%, rgba(20, 184, 166, 0.16), transparent 62%),
+    radial-gradient(820px 460px at -6% 0%, rgba(180, 83, 9, 0.18), transparent 58%);
+  --panel: #241f1b;
+  --panel-2: #2a2420;
+  --panel-3: #322b26;
+  --panel-hover: #2e2823;
+  --panel-glass: rgba(36, 31, 27, 0.78);
+
+  /* 深色下墨色反过来：从暖白一路到暖灰 */
+  --ink: #f0eae1;
+  --ink-2: #c4b8a8;
+  --ink-3: #8e8171;
+
+  --line: #3a322c;
+  --line-soft: #302a25;
+
+  /* 青绿主色提亮一档，暗底上才够得着对比度 */
+  --accent: #2dbfae;
+  --accent-ink: #7de0d2;
+  --accent-deep: #99f6e4;
+  --accent-soft: #17332f;
+  --accent-line: #2a5b53;
+  --accent-glow: rgba(45, 191, 174, 0.32);
+
+  --warm: #f0a868;
+  --warm-soft: #3a2a15;
+  --warm-line: #5c4322;
+
+  --danger: #f97066;
+  --danger-soft: #3a1f1d;
+  --danger-line: #6b2e2a;
+
+  --star: #f5b400;
+  --star-off: #4a423a;
+
+  /* 小令牌（组件里不写死颜色的那份收益，在这里兑现） */
+  --accent-light: #3fd0be;
+  --accent-soft-strong: #1e423c;
+  --accent-halo: rgba(45, 191, 174, 0.18);
+  --line-strong: #4a4139;
+  --code-bg: rgba(255, 255, 255, 0.09);
+  --stage-fade: linear-gradient(180deg, #1f1b17, var(--panel) 160px);
+  --card-glow: linear-gradient(180deg, #1f2f2c 0%, var(--panel) 55%);
+  --card-glow-2: linear-gradient(180deg, #1f2b29 0%, var(--panel) 50%);
+  --card-glow-active: linear-gradient(180deg, var(--accent-soft), var(--panel) 70%);
+  --setup-bar: linear-gradient(180deg, rgba(36, 31, 27, 0.6), var(--panel) 45%);
+  /* 墨色实心按钮在深色里翻过来：浅底深字 */
+  --ink-btn: #e8e0d4;
+  --ink-btn-hover: #f5efe4;
+  --ink-btn-text: #1b1815;
+  --scrollbar: #4a4139;
+  --scrollbar-hover: #5d5348;
+  --warm-ink: #f3c98b;
+  --overlay-bg: rgba(20, 17, 15, 0.72);
+
+  /* 暗底上的阴影要更重才看得出层次 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 10px 26px -14px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.45), 0 22px 44px -22px rgba(0, 0, 0, 0.75);
+  --shadow-pop: 0 14px 34px -14px rgba(0, 0, 0, 0.8);
+
+  --ring: 0 0 0 3px rgba(45, 191, 174, 0.3);
+
+  /* 深色里黑颗粒等于没画，换成亮颗粒、透明度提一点 */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
+
+  color-scheme: dark;
 }
 
 * {
@@ -89,7 +197,8 @@ body,
 
 body {
   background-color: var(--bg);
-  background-image: var(--bg-tint);
+  /* 纸纹在最上层（3.5% 透明度），下面是两层彩色晕染 */
+  background-image: var(--paper-grain), var(--bg-tint);
   background-attachment: fixed;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
@@ -121,7 +230,7 @@ body {
 /* 细滚动条：系统默认那条又粗又灰，在这个底色上特别显眼 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cfd6de transparent;
+  scrollbar-color: var(--scrollbar) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -134,14 +243,14 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d3d9e0;
+  background: var(--scrollbar);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #b9c1cb;
+  background: var(--scrollbar-hover);
   background-clip: content-box;
 }
 
@@ -176,7 +285,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 11px 22px;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--panel-glass);
   backdrop-filter: saturate(180%) blur(14px);
   border-bottom: 1px solid var(--line);
 }
@@ -311,7 +420,7 @@ body {
 }
 
 .btn.primary {
-  background: linear-gradient(180deg, #12a697, var(--accent));
+  background: linear-gradient(180deg, var(--accent-light), var(--accent));
   border-color: rgba(15, 118, 110, 0.55);
   color: #fff;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1), 0 8px 18px -10px var(--accent-glow),
@@ -332,7 +441,7 @@ body {
 }
 
 .btn.ghost:not(:disabled):hover {
-  border-color: #d5dbe3;
+  border-color: var(--line-strong);
   color: var(--ink);
   box-shadow: var(--shadow-sm);
 }
@@ -344,7 +453,7 @@ body {
 }
 
 .btn.subtle:not(:disabled):hover {
-  background: #d7f0eb;
+  background: var(--accent-soft-strong);
 }
 
 /* 小一号：顶栏、卡片头这类地方用 */
@@ -400,7 +509,7 @@ body {
 .setup-title {
   font-size: var(--fs-display);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-display);
   margin: 0 0 10px;
 }
 
@@ -429,7 +538,7 @@ body {
   border-radius: var(--radius);
   padding: 12px 15px;
   font-size: var(--fs-sm);
-  color: #7c4a12;
+  color: var(--warm-ink);
   line-height: 1.7;
   margin-bottom: 22px;
 }
@@ -453,7 +562,7 @@ body {
 .field-hint code {
   font-family: inherit;
   font-size: 12.5px;
-  background: rgba(16, 24, 40, 0.07);
+  background: var(--code-bg);
   padding: 1px 5px;
   border-radius: 5px;
 }
@@ -499,12 +608,12 @@ body {
 }
 
 .field input:hover {
-  border-color: #d5dbe3;
+  border-color: var(--line-strong);
 }
 
 .field input:focus {
   border-color: var(--accent);
-  background: #fff;
+  background: var(--panel);
   box-shadow: var(--ring);
 }
 
@@ -518,7 +627,7 @@ body {
   flex-wrap: wrap;
   margin: 26px -32px 0;
   padding: 14px 32px 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), #fff 45%);
+  background: var(--setup-bar);
   border-top: 1px solid var(--line-soft);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
   backdrop-filter: blur(8px);
@@ -570,15 +679,15 @@ body {
 }
 
 .persona-preset:hover {
-  border-color: #d5dbe3;
-  background: #fff;
+  border-color: var(--line-strong);
+  background: var(--panel);
   box-shadow: var(--shadow-sm);
 }
 
 .persona-preset.active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  box-shadow: 0 0 0 3px var(--accent-halo);
 }
 
 .persona-preset.active:hover {
@@ -621,7 +730,7 @@ body {
 
 .persona-prompt:focus {
   border-color: var(--accent);
-  background: #fff;
+  background: var(--panel);
   box-shadow: var(--ring);
 }
 
@@ -753,7 +862,7 @@ body {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel-glass);
   box-shadow: var(--shadow-xs);
   backdrop-filter: blur(6px);
 }
@@ -857,7 +966,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background: linear-gradient(180deg, #fdfefe, var(--panel) 160px);
+  background: var(--stage-fade);
 }
 
 .block-empty {
@@ -945,24 +1054,31 @@ body {
 
 .bubble {
   max-width: 80%;
-  padding: 11px 15px;
-  border-radius: 16px;
+  padding: 12px 16px;
+  border-radius: 18px;
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.7;
+  transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 
 .msg.ai .bubble {
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   box-shadow: var(--shadow-sm);
   border-top-left-radius: 6px;
 }
 
+/* 指针放上去轻轻抬一下，像指尖碰到纸面 */
+.msg.ai .bubble:hover {
+  box-shadow: var(--shadow);
+}
+
 .msg.user .bubble {
-  background: linear-gradient(180deg, #12a697, var(--accent));
+  background: linear-gradient(180deg, var(--accent-light, #12a697), var(--accent));
   color: #fff;
   border-top-right-radius: 6px;
-  box-shadow: 0 6px 16px -10px var(--accent-glow);
+  box-shadow: 0 8px 20px -12px var(--accent-glow);
 }
 
 .bubble.typing {
@@ -1038,9 +1154,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: var(--panel);
   box-shadow: var(--shadow-sm);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
@@ -1048,7 +1164,7 @@ body {
 
 .composer-bar:focus-within {
   border-color: var(--accent-line);
-  box-shadow: var(--shadow), 0 0 0 3px rgba(13, 148, 136, 0.14);
+  box-shadow: var(--shadow), 0 0 0 4px var(--accent-glow);
 }
 
 .sample-btn {
@@ -1101,16 +1217,18 @@ body {
   flex-wrap: wrap;
 }
 
-/* 「生成」用墨色实心：跟「发送」的青绿分开，两个都是主要动作就分不出主次了 */
+/* 「生成」用墨色实心：跟「发送」的青绿分开，两个都是主要动作就分不出主次了。
+   深色主题里这块反过来：浅底深字，靠的是 --ink-btn 那组令牌 */
 .btn.ink {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
+  background: var(--ink-btn);
+  border-color: var(--ink-btn);
+  color: var(--ink-btn-text);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12), 0 8px 18px -12px rgba(16, 24, 40, 0.5);
 }
 
 .btn.ink:not(:disabled):hover {
-  background: #1d2939;
+  background: var(--ink-btn-hover);
+  border-color: var(--ink-btn-hover);
 }
 
 .idle-hint {
@@ -1188,7 +1306,7 @@ body {
 .result-title {
   font-size: var(--fs-display);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-display);
   margin: 0 0 4px;
 }
 
@@ -1351,10 +1469,28 @@ body {
 
 .outline-item.active {
   color: #fff;
-  background: linear-gradient(180deg, #12a697, var(--accent));
+  background: linear-gradient(180deg, var(--accent-light), var(--accent));
   border-color: transparent;
   font-weight: 600;
   box-shadow: 0 6px 14px -8px var(--accent-glow);
+  /* 0.9.9：当前位置有一个轻轻的呼吸，让「我在哪」不靠颜色也感觉得到 */
+  animation: outline-breathe 2.6s var(--ease) infinite;
+}
+
+@keyframes outline-breathe {
+  0%,
+  100% {
+    box-shadow: 0 6px 14px -8px var(--accent-glow);
+  }
+  50% {
+    box-shadow: 0 6px 18px -6px var(--accent-glow), 0 0 0 3px var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-item.active {
+    animation: none;
+  }
 }
 
 /* 还没写到内容的栏，虚线表示是空的，但仍然可以跳过去补 */
@@ -1472,7 +1608,7 @@ body {
 }
 
 .highlight-card {
-  background: linear-gradient(180deg, #f2fbf9 0%, #ffffff 55%);
+  background: var(--card-glow);
   border-color: var(--accent-line);
 }
 
@@ -1622,7 +1758,7 @@ body {
   padding: 6px 10px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--panel);
   color: var(--ink);
   outline: none;
   box-shadow: var(--ring);
@@ -1733,7 +1869,7 @@ body {
 .state-row .edit-input:focus {
   border-color: var(--accent);
   box-shadow: var(--ring);
-  background: #fff;
+  background: var(--panel);
 }
 
 /* 备注：一句话，想写就写，不写也行 */
@@ -1761,7 +1897,7 @@ body {
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--ring);
-  background: #fff;
+  background: var(--panel);
 }
 
 /* 上一块还差几个要点没聊到：一句提示 + 两个小按钮，不打断、不自动补问 */
@@ -1886,7 +2022,7 @@ body {
 }
 
 .plan-card {
-  background: linear-gradient(180deg, #f6fbfa 0%, #ffffff 50%);
+  background: var(--card-glow-2);
   border-color: var(--accent-line);
 }
 
@@ -1920,7 +2056,7 @@ body {
 .refine-box textarea:focus {
   border-color: var(--accent);
   box-shadow: var(--ring);
-  background: #fff;
+  background: var(--panel);
 }
 
 .refine-box textarea:disabled {
@@ -2025,8 +2161,8 @@ body {
 
 .recent-card.active {
   border-color: var(--accent);
-  background: linear-gradient(180deg, var(--accent-soft), #ffffff 70%);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  background: var(--card-glow-active);
+  box-shadow: 0 0 0 3px var(--accent-halo);
 }
 
 /* 没记录的那一周照样占位置：空白本身就是要看见的信息 */
@@ -2168,13 +2304,13 @@ body {
 }
 
 .cal-day:hover {
-  background: #fff;
+  background: var(--panel);
   color: var(--accent-ink);
   box-shadow: var(--shadow-xs);
 }
 
 .cal-row.has-entry .cal-day:hover {
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--panel-glass);
 }
 
 /* 补齐成整周的那几天：画淡，一眼能看出不属于这个月 */
@@ -2274,7 +2410,7 @@ body {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(244, 246, 248, 0.74);
+  background: var(--overlay-bg);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
@@ -2647,5 +2783,26 @@ body {
   .note-composer {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+/* —— FadeIn：给「值得停一下」的卡片一个轻轻浮出来的一下 —— */
+.fade-in {
+  display: block;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.22s var(--ease), transform 0.22s var(--ease);
+}
+
+.fade-in.on {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    transition: none;
+    opacity: 1;
+    transform: none;
   }
 }

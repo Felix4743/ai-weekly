@@ -15,6 +15,7 @@ import { compareScores, compareText, previousEntry, recurringPatterns } from '..
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
 import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { FadeIn } from './FadeIn'
 import { IconBack, IconChart, IconCheck, IconCopy, IconRefresh } from './icons'
 import { ResultBody } from './ResultBody'
 
@@ -34,6 +35,11 @@ interface Props {
   onOpenHistory: () => void
 }
 
+/**
+ * 结果页的正文（结果页与总览页共用）。
+ * 只在「值得停一下」的地方包一层 FadeIn —— 不是每行都动，
+ * 是那句「本周主线」与那一排星星，让你进门先看到它。
+ */
 export function ResultPage({
   result,
   archive,
@@ -207,9 +213,11 @@ export function ResultPage({
       </div>
 
       {/* 页头概览（0.9.5）：一眼看到「这周状态怎么样、主线是哪一句」——
-          不用先滚过六张卡。都从这份结果里读，改了就跟着变 */}
-      <section className="result-brief" aria-label="这周概览">
-        <div className="brief-scores">
+          不用先滚过六张卡。都从这份结果里读，改了就跟着变。
+          0.9.9 起整个概览带一点入场（FadeIn）：星星在先、主线压一拍 */}
+      <FadeIn delay={0.04}>
+        <section className="result-brief" aria-label="这周概览">
+          <div className="brief-scores">
           {scoredFields.length === 0 ? (
             <span className="brief-empty">这周没打分</span>
           ) : (
@@ -246,15 +254,18 @@ export function ResultPage({
             })
           )}
         </div>
-        <p className="brief-main">
-          <span className="brief-label">本周主线</span>
-          {mainLine ? (
-            <span className="brief-main-text">{mainLine}</span>
-          ) : (
-            <span className="brief-empty">（还没有主线）</span>
-          )}
-        </p>
-      </section>
+        <FadeIn delay={0.16}>
+          <p className="brief-main">
+            <span className="brief-label">本周主线</span>
+            {mainLine ? (
+              <span className="brief-main-text">{mainLine}</span>
+            ) : (
+              <span className="brief-empty">（还没有主线）</span>
+            )}
+          </p>
+        </FadeIn>
+        </section>
+      </FadeIn>
 
       {/* 内容比较长，顶部放一条目录，点一下就跳到对应那一栏 */}
       <nav className="outline-bar" ref={navRef} aria-label="本周梳理目录">

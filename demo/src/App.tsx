@@ -50,7 +50,8 @@ import { SetupPage } from './ui/SetupPage'
 import { ChatPage } from './ui/ChatPage'
 import { ResultPage } from './ui/ResultPage'
 import { HistoryPage } from './ui/HistoryPage'
-import { IconChart, IconGear } from './ui/icons'
+import { IconChart, IconGear, IconMoon, IconSun } from './ui/icons'
+import { applyTheme, readTheme, toggleTheme, type Theme } from './ui/theme'
 
 type Page = 'setup' | 'chat' | 'result' | 'history'
 type Overlay = { title: string; sub: string } | null
@@ -103,6 +104,11 @@ export default function App() {
   const [cameFrom, setCameFrom] = useState<Page | null>(null)
   /** 状态四项的分数：采访里那张卡上点出来的，出结果时贴到结果上 */
   const [stateScores, setStateScores] = useState<StateScores>({})
+  /**
+   * 亮色还是暗色（0.9.10）。只活在界面这一层，不进 config、不进归档 ——
+   * 它跟「这周记了什么」无关，见 `ui/theme.ts` 顶上那段说明。
+   */
+  const [theme, setTheme] = useState<Theme>(() => readTheme())
   /** 状态卡上那一行备注（旧档的四行文字也会并到这里） */
   const [stateNote, setStateNote] = useState('')
   /**
@@ -328,6 +334,11 @@ export default function App() {
     // 仅在挂载时执行一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 主题落到 <html data-theme>：styles.css 里那一整块深色令牌就靠它生效
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
 
   const runSummarize = useCallback(async () => {
     setOverlay({ title: '正在整理这一周…', sub: '把你说过的内容归纳成清单，再想想下周' })
@@ -715,6 +726,16 @@ export default function App() {
           </span>
         </div>
         <div className="topbar-right">
+          {/* 主题开关（0.9.10）：一个按钮切亮/暗，点击就存，不占设置页的地方 */}
+          <button
+            className="btn ghost sm icon-only"
+            type="button"
+            onClick={() => setTheme(toggleTheme(theme))}
+            title={theme === 'dark' ? '切成亮色' : '切成暗色'}
+            aria-label={theme === 'dark' ? '切成亮色' : '切成暗色'}
+          >
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+          </button>
           {page !== 'setup' && page !== 'history' && (
             <button className="btn ghost sm" type="button" onClick={openHistory}>
               <IconChart />

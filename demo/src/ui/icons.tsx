@@ -159,3 +159,22 @@ export function IconRefresh({ size = 16, className }: IconProps) {
     </svg>
   )
 }
+
+/** 亮色主题：太阳（0.9.10 主题开关用）。 */
+export function IconSun({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size, className)}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
+    </svg>
+  )
+}
+
+/** 深色主题：月亮。 */
+export function IconMoon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size, className)}>
+      <path d="M20 14.2A8.2 8.2 0 019.8 4a8.2 8.2 0 1010.2 10.2z" />
+    </svg>
+  )
+}
