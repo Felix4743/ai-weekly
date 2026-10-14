@@ -7,6 +7,7 @@ import {
 } from '../core/persona'
 import { createDefaultConfig, type AppConfig, type PersonaPresetId } from '../core/types'
 import { loadSession } from '../storage/localStore'
+import { BlurText } from './BlurText'
 import { IconBack, IconChart, IconCheck, IconRefresh, IconSparkle } from './icons'
 
 interface Props {
@@ -71,7 +72,9 @@ export function SetupPage({ config, ongoing, onSubmit, onRestore, onBackToChat }
   return (
     <main className="page setup">
       <div className="setup-card">
-        <h1 className="setup-title">{ongoing ? '设置' : '开始之前'}</h1>
+        <h1 className="setup-title">
+          <BlurText text={ongoing ? '设置' : '开始之前'} />
+        </h1>
         <p className="setup-desc">
           AI 周报会以一问一答的方式，陪你把这一周过一遍，再给你一份属于自己的总结和下周计划。
         </p>

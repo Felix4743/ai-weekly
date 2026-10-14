@@ -16,6 +16,7 @@ import type { PersonNote, StateKey, WeeklyResult } from '../core/types'
 import { CollapsibleCard, type CollapsibleKey } from './CollapsibleCard'
 import { EditableList, EditablePeople } from './EditableList'
 import { StateScore } from './StateScore'
+import { spotlightProps, SPOTLIGHT_CLASS } from './spotlight'
 
 /**
  * 一份结果的正文：几栏清单（可折叠）+ 本周主线 + 下周计划 + 反复出现。
@@ -81,7 +82,7 @@ export function ResultBody({
     <>
       {/* 最该被看见的两块放最前面（0.9.5 重排）：「这周到底是怎么回事」和「下周做什么」，
           才是这份结果值得看第二遍的东西；六张清单卡是佐证，退到后面去 */}
-      <section className="card highlight-card" id="section-highlights">
+      <section className={`card highlight-card ${SPOTLIGHT_CLASS}`} id="section-highlights" {...spotlightProps()}>
         <h2 className="card-title">本周主线</h2>
         <p className="card-desc">
           第一条是这一周的判断，后面几条只写清单里没有的东西 · 都可以直接改
@@ -96,7 +97,7 @@ export function ResultBody({
         />
       </section>
 
-      <section className="card plan-card" id="section-plan">
+      <section className={`card plan-card ${SPOTLIGHT_CLASS}`} id="section-plan" {...spotlightProps()}>
         <h2 className="card-title">
           下周计划
           <span className="badge-ai">AI 建议</span>

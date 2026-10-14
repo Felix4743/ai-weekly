@@ -54,6 +54,9 @@
   --accent-light: #12a697;
   --accent-soft-strong: #d7f0eb;
   --accent-halo: rgba(15, 148, 136, 0.12);
+  /* 指针划过卡片时那团柔光（.spotlight）。
+     0.16 是试出来的：再淡（0.10）在「本周主线」那张本来带青绿渐变的卡上根本看不出来 */
+  --spot-glow: rgba(15, 148, 136, 0.16);
   --line-strong: #d5dbe3;
   --code-bg: rgba(16, 24, 40, 0.07);
   --stage-fade: linear-gradient(180deg, #fdfefe, var(--panel) 160px);
@@ -153,6 +156,7 @@
   --accent-light: #3fd0be;
   --accent-soft-strong: #1e423c;
   --accent-halo: rgba(45, 191, 174, 0.18);
+  --spot-glow: rgba(45, 191, 174, 0.24);
   --line-strong: #4a4139;
   --code-bg: rgba(255, 255, 255, 0.09);
   --stage-fade: linear-gradient(180deg, #1f1b17, var(--panel) 160px);
@@ -2804,5 +2808,91 @@ body {
     transition: none;
     opacity: 1;
     transform: none;
+  }
+}
+
+/* —— 只在读屏里存在的文字：给「拆成好多个 span」的动画留一份完整的原话 —— */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* —— BlurText：大标题一个字一个字从模糊里浮出来（0.9.10）—— */
+.blur-text__word {
+  display: inline-block;
+}
+
+.blur-text__ch {
+  display: inline-block;
+  /* 关键字：从「模糊 + 下沉 + 透明」走到原样。forward 让动画停在结束态，不回弹 */
+  animation: blur-text-in 0.62s var(--ease) both;
+}
+
+.blur-text__space {
+  display: inline-block;
+  width: 0.28em;
+}
+
+@keyframes blur-text-in {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blur-text__ch {
+    animation: none;
+  }
+}
+
+/* —— CountUp：滚动的数字（0.9.10）——
+   等宽数字：不等宽的话每跳一位整行都会左右挪一下，「滚上去」就变成了「抖」 */
+.count-up {
+  font-variant-numeric: tabular-nums;
+}
+
+/* —— Spotlight：指针划过卡片时跟上的一团柔光（0.9.10）——
+   光斑靠 ::after 画，`inset: 0` + `border-radius: inherit` 保证它跟卡片一样圆。
+   `pointer-events: none` 是必须的：不然它会盖住卡片上所有可点的地方。 */
+.spotlight {
+  position: relative;
+}
+
+.spotlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s var(--ease);
+  background: radial-gradient(
+    190px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    var(--spot-glow),
+    transparent 70%
+  );
+}
+
+.spotlight[data-spot='on']::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight::after {
+    transition: none;
   }
 }

@@ -33,6 +33,8 @@ import {
 } from '../core/week'
 import type { WeeklyResult } from '../core/types'
 import { ALL_COLLAPSED, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { BlurText } from './BlurText'
+import { CountUp } from './CountUp'
 import { FadeIn } from './FadeIn'
 import { IconBack, IconCheck, IconChevron, IconCopy, IconSparkle } from './icons'
 import { ResultBody } from './ResultBody'
@@ -144,7 +146,9 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
     <main className="page history">
       <div className="result-head">
         <div>
-          <h1 className="result-title">总览</h1>
+          <h1 className="result-title">
+            <BlurText text="总览" />
+          </h1>
           <p className="result-sub">
             {stats.weeks === 0 ? (
               '还没有记录。聊完一次，那一周就会出现在这里'
@@ -159,9 +163,12 @@ export function HistoryPage({ archive, onArchiveChange, onBack, onStart }: Props
                     {' · '}
                   </>
                 )}
-                {`已经记了 ${stats.weeks} 周 · 最近连续 ${stats.streak} 周${
-                  stats.hasThisWeek ? '' : ' · 这周还没记'
-                }`}
+                {/* 0.9.10：两个数字滚上去 —— 这一句是全页唯一值得动的地方 */}
+                {'已经记了 '}
+                <CountUp value={stats.weeks} />
+                {' 周 · 最近连续 '}
+                <CountUp value={stats.streak} />
+                {` 周${stats.hasThisWeek ? '' : ' · 这周还没记'}`}
               </>
             )}
           </p>

@@ -631,6 +631,28 @@ async function main() {
 
     if (SHOT) {
       await shot(client, 'result-top')
+      /**
+       * 柔光斑那张（0.9.10）：`--shot` 拍的是「没人碰过」的静态页面，
+       * 而 `.spotlight` 的光是跟着指针走的 —— 光靠上面那张永远看不见它。
+       * 所以这里直接把指针位置那两件事做了（写 CSS 变量 + 挂 `data-spot`），
+       * 相当于替鼠标停在卡片左上方。真按一下鼠标也行，但 CDP 的合成 pointer 事件
+       * 在本项目里不生效（见「打分」那段的注释），不如直接照着结果摆。
+       */
+      const lit = await evaluate(
+        client,
+        `const card = document.querySelector('#section-highlights')
+         if (!card) return false
+         const box = card.getBoundingClientRect()
+         card.style.setProperty('--spot-x', Math.round(box.width * 0.32) + 'px')
+         card.style.setProperty('--spot-y', Math.round(box.height * 0.3) + 'px')
+         card.dataset.spot = 'on'
+         card.scrollIntoView({ block: 'center' })
+         return card.dataset.spot`,
+      )
+      if (lit) {
+        await sleep(400) // 等那 0.28s 的透明度过渡走完
+        await shot(client, 'result-spotlight')
+      }
       // 展开「状态」与「反复出现」两栏 —— 0.9.6 新长的东西都在这两栏里
       await click(client, '#section-state .card-head')
       await click(client, '#section-pattern .card-head')

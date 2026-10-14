@@ -15,6 +15,7 @@ import { compareScores, compareText, previousEntry, recurringPatterns } from '..
 import type { ChatMessage, WeeklyResult } from '../core/types'
 import { weekRangeText, type WeekKey } from '../core/week'
 import { ALL_COLLAPSED, isCollapsible, toggledCollapsed, type CollapsibleKey } from './CollapsibleCard'
+import { BlurText } from './BlurText'
 import { FadeIn } from './FadeIn'
 import { IconBack, IconChart, IconCheck, IconCopy, IconRefresh } from './icons'
 import { ResultBody } from './ResultBody'
@@ -188,7 +189,9 @@ export function ResultPage({
     <main className="page result" ref={scrollerRef}>
       <div className="result-head">
         <div>
-          <h1 className="result-title">本周梳理</h1>
+          <h1 className="result-title">
+            <BlurText text="本周梳理" />
+          </h1>
           <p className="result-sub">
             {restored
               ? '这是上一次保存的结果'
